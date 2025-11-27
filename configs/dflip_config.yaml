@@ -1,0 +1,202 @@
+# DFLIP Configuration File
+# This file contains all hyperparameters and paths for training and inference
+
+# ===========================
+# Model Configuration
+# ===========================
+model:
+  base_model: "Qwen/Qwen2.5-VL-7B-Instruct"
+  cache_dir: "./models_cache"
+  num_generators: 10  # Number of generator model classes (including Real=0)
+  
+  # Side Network Configuration for Stage 1 (Vision)
+  # Qwen VIT weights are frozen, only Side Network is trainable
+  side_network:
+    extract_layers: [6, 12, 18]  # Intermediate layers to extract features from
+    fusion_strategy: "concat"     # Options: concat, add, attention
+    hidden_dim: 1024              # Should match Qwen VIT hidden size
+  
+  # Decoder Configuration
+  decoder:
+    enabled: true
+    output_dim: 512
+    reconstruction_weight: 0.3    # Weight for reconstruction loss
+  
+  # LoRA Configuration for Stage 2 (LLM)
+  stage2_lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.1
+    # Target modules for language model
+    target_modules:
+      - "q_proj"
+      - "v_proj" 
+      - "k_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+    bias: "none"
+    task_type: "CAUSAL_LM"
+
+# ===========================
+# Data Configuration
+# ===========================
+data:
+  # Dataset paths
+  metadata_path: "./assets/dflip3k_meta.json"
+  image_root: "./data/images"
+  mask_root: "./data/masks"
+  
+  # Data splits
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  
+  # Data augmentation
+  image_size: 448  # Qwen VL default
+  augmentation:
+    horizontal_flip: true
+    rotation_range: 15
+    brightness_range: 0.1
+    contrast_range: 0.1
+  
+  # Dataloader settings
+  num_workers: 4
+  pin_memory: true
+
+# ===========================
+# Stage 1 Training (Profiler)
+# ===========================
+stage1_training:
+  # Basic settings
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  num_epochs: 10
+  
+  # Optimizer
+  optimizer: "adamw"
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+  
+  # Scheduler
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  
+  # Loss weights
+  loss_weights:
+    detection: 1.0       # Binary classification (real/fake)
+    identification: 1.0  # Multi-class (generator model)
+    localization: 0.5    # Segmentation (forgery mask)
+    reconstruction: 0.3  # Decoder reconstruction loss
+  
+  # Mixed precision
+  fp16: false
+  bf16: true
+  
+  # Checkpointing
+  save_strategy: "epoch"
+  save_total_limit: 3
+  output_dir: "./checkpoints/stage1"
+  
+  # Logging
+  logging_steps: 10
+  eval_strategy: "epoch"
+
+# ===========================
+# Stage 2 Training (Interpreter)
+# ===========================
+stage2_training:
+  # Basic settings
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  num_epochs: 5
+  
+  # Optimizer
+  optimizer: "adamw"
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+  
+  # Scheduler
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  
+  # Load Stage 1 weights
+  stage1_checkpoint: "./checkpoints/stage1/dflip_vision_lora.bin"
+  freeze_vision: true
+  
+  # Generation settings
+  max_new_tokens: 256
+  temperature: 0.7
+  top_p: 0.9
+  
+  # Mixed precision
+  fp16: false
+  bf16: true
+  
+  # Checkpointing
+  save_strategy: "epoch"
+  save_total_limit: 3
+  output_dir: "./checkpoints/stage2"
+  
+  # Logging
+  logging_steps: 5
+  eval_strategy: "epoch"
+
+# ===========================
+# Inference Configuration
+# ===========================
+inference:
+  # Model checkpoints
+  stage1_checkpoint: "./checkpoints/stage1/dflip_vision_lora.bin"
+  stage2_checkpoint: "./checkpoints/stage2/dflip_llm_lora.bin"
+  
+  # Inference settings
+  device: "cuda"
+  batch_size: 1
+  
+  # Stage 1 settings
+  detection_threshold: 0.5
+  identification_topk: 3
+  
+  # Stage 2 settings
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: true
+  
+  # Output settings
+  save_heatmaps: true
+  save_reports: true
+  output_dir: "./outputs"
+
+# ===========================
+# Logging & Monitoring
+# ===========================
+logging:
+  use_wandb: true
+  wandb_project: "dflip-linguistic-profiling"
+  wandb_entity: null  # Set your wandb username here
+  log_level: "INFO"
+
+# ===========================
+# Hardware Settings
+# ===========================
+hardware:
+  seed: 42
+  cuda_deterministic: true
+  dataloader_num_workers: 4
+  
+  # Distributed training
+  ddp: false
+  local_rank: -1
+  
+  # DeepSpeed (optional)
+  use_deepspeed: false
+  deepspeed_config: null
