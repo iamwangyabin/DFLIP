@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
 import yaml
-from dflip_models.qwen_vision import DFLIPProfiler, create_profiler
+from dflip_models.profiler import DFLIPProfiler, create_profiler
 
 
 def test_model_initialization():

@@ -51,7 +51,7 @@ class DFLIPInterpreter(nn.Module):
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_name,
             cache_dir=cache_dir,
-            torch_dtype="auto",
+            dtype="auto",
             device_map="auto"
         )
         
