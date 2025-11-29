@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForImageTextToText
 
 """
 ================================================================================
@@ -63,7 +63,7 @@ Qwen3-VL Vision Encoder 独立封装 (Standard Backbone Wrapper)
 class Qwen3_VisionEncoder(nn.Module):
     def __init__(self, model_path, freeze=True):
         super().__init__()
-        full_model = AutoModelForCausalLM.from_pretrained(
+        full_model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             device_map="cpu",
             trust_remote_code=True,
