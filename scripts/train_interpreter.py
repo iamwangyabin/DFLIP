@@ -24,7 +24,7 @@ import wandb
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dflip_models import DFLIPInterpreter, create_interpreter
-from dflip_dataset import create_dataloader
+from dataset import create_dataloader
 
 
 def parse_args():

@@ -8,21 +8,7 @@ from peft import get_peft_model, LoraConfig, PeftModel
 from .vision_encoder import TimmMultiLevelEncoder
 
 
-class LocalizationHead(nn.Module):
-    """Localization head for pixel-level prediction."""
-    def __init__(self, input_dim: int, hidden_dim: int = 256):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, 1)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class BayesianEvidenceProfiler(nn.Module):
+class BayesianEvidenceClassifier(nn.Module):
     """
     Bayesian Hierarchical Evidence Profiler (BHEP).
     Uses Evidential Deep Learning (EDL) to provide uncertainty estimation
@@ -33,10 +19,7 @@ class BayesianEvidenceProfiler(nn.Module):
         self.num_families = num_families
         self.num_versions = num_versions
         self.register_buffer('hierarchy_mask', hierarchy_mask)
-        
-        # ==========================================================
-        # 1. Base Branch (The Generalist)
-        # ==========================================================
+
         # Standard MLP for general forgery traces
         self.base_head = nn.Sequential(
             nn.Linear(feature_dim, 256),
@@ -46,24 +29,18 @@ class BayesianEvidenceProfiler(nn.Module):
             nn.Linear(256, 1)  # Output Logit
         )
 
-        # ==========================================================
-        # 2. Family Branch (The Specialist - Coarse)
-        # ==========================================================
         # Predicts Dirichlet parameters alpha for families
         self.family_head = nn.Sequential(
             nn.Linear(feature_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(256, num_families),
-            nn.Softplus()  # Ensure Evidence >= 0
+            nn.Softplus()
         )
         
         # Opinion Projection: Map family belief to real/fake score
         self.op_fam = nn.Linear(num_families, 1)
 
-        # ==========================================================
-        # 3. Version Branch (The Specialist - Fine)
-        # ==========================================================
         # Conditional EDL: Input features + family belief
         self.version_head = nn.Sequential(
             nn.Linear(feature_dim + num_families, 512),
@@ -77,18 +54,12 @@ class BayesianEvidenceProfiler(nn.Module):
         self.op_ver = nn.Linear(num_versions, 1)
 
     def forward(self, features: torch.Tensor):
-        """
-        features: (Batch, feature_dim) - Global pooled features
-        """
         batch_size = features.size(0)
         device = features.device
 
-        # --- Step 1: Base Branch ---
         logit_base = self.base_head(features)
-        # Base uncertainty (fixed neutral prior)
         u_base = torch.full((batch_size, 1), 0.5, device=device)
 
-        # --- Step 2: Family Branch ---
         evidence_fam = self.family_head(features)
         alpha_fam = evidence_fam + 1.0
         
@@ -98,13 +69,9 @@ class BayesianEvidenceProfiler(nn.Module):
         
         logit_fam = self.op_fam(b_fam)
 
-        # --- Step 3: Version Branch ---
-        # Conditional Input: Features + Family Belief
         ver_input = torch.cat([features, b_fam], dim=1)
         evidence_ver_raw = self.version_head(ver_input)
-        
-        # Hierarchical Gating
-        # Suppress versions belonging to families with low belief
+
         gate = torch.matmul(b_fam, self.hierarchy_mask)
         evidence_ver = evidence_ver_raw * gate
         alpha_ver = evidence_ver + 1.0
@@ -115,11 +82,9 @@ class BayesianEvidenceProfiler(nn.Module):
         
         logit_ver = self.op_ver(b_ver)
 
-        # --- Step 4: Bayesian Fusion ---
         eps = 1e-5
         uncertainties = torch.cat([u_base, u_fam, u_ver], dim=1)
         
-        # Weighting: Inverse of uncertainty
         raw_weights = 1.0 / (uncertainties + eps)
         norm_weights = F.softmax(raw_weights, dim=1)  # (B, 3)
         
@@ -146,10 +111,6 @@ class BayesianEvidenceProfiler(nn.Module):
 
 
 class DFLIPProfiler(nn.Module):
-    """
-    DFLIPProfiler with BHEP integration.
-    """
-
     def __init__(
         self,
         model_name: str = "dinov2_vitb14",
@@ -185,39 +146,24 @@ class DFLIPProfiler(nn.Module):
 
         # BHEP Configuration
         bhep_config = config.get('bhep', {})
-        if bhep_config.get('enabled', False):
-            self.use_bhep = True
-            num_families = bhep_config['num_families']
-            num_versions = bhep_config['num_versions']
-            hierarchy_list = bhep_config['hierarchy']
-            
-            # Build hierarchy mask from config list
-            # hierarchy_list[i] contains indices of versions belonging to family i
-            mask = torch.zeros(num_families, num_versions)
-            for fam_idx, ver_indices in enumerate(hierarchy_list):
-                for ver_idx in ver_indices:
-                    if ver_idx < num_versions:
-                        mask[fam_idx, ver_idx] = 1.0
-            
-            self.bhep_head = BayesianEvidenceProfiler(
-                feature_dim=self.vision_hidden_size,
-                num_families=num_families,
-                num_versions=num_versions,
-                hierarchy_mask=mask
-            )
-        else:
-            self.use_bhep = False
-            # Legacy simple head
-            self.detection_head = nn.Sequential(
-                nn.Linear(self.vision_hidden_size, 256),
-                nn.ReLU(inplace=True),
-                nn.Dropout(0.1),
-                nn.Linear(256, 2)
-            )
 
-        self.localization_head = LocalizationHead(
-            input_dim=self.vision_hidden_size,
-            hidden_dim=256
+        num_families = bhep_config['num_families']
+        num_versions = bhep_config['num_versions']
+        hierarchy_list = bhep_config['hierarchy']
+
+        # Build hierarchy mask from config list
+        # hierarchy_list[i] contains indices of versions belonging to family i
+        mask = torch.zeros(num_families, num_versions)
+        for fam_idx, ver_indices in enumerate(hierarchy_list):
+            for ver_idx in ver_indices:
+                if ver_idx < num_versions:
+                    mask[fam_idx, ver_idx] = 1.0
+
+        self.bhep_head = BayesianEvidenceClassifier(
+            feature_dim=self.vision_hidden_size,
+            num_families=num_families,
+            num_versions=num_versions,
+            hierarchy_mask=mask
         )
 
         self._print_trainable_parameters()
@@ -233,34 +179,12 @@ class DFLIPProfiler(nn.Module):
         pooled_features = self.vision_encoder(pixel_values)
 
         outputs = {}
-        
-        if self.use_bhep:
-            bhep_outputs = self.bhep_head(pooled_features)
-            outputs.update(bhep_outputs)
-            # Add identification logits for compatibility (using version belief)
-            # Map version belief to num_versions logits (mocking)
-            outputs["identification_logits"] = torch.log(bhep_outputs["b_ver"] + 1e-9)
-        else:
-            detection_logits = self.detection_head(pooled_features)
-            outputs["detection_logits"] = detection_logits
-            # Mock identification logits for legacy
-            outputs["identification_logits"] = torch.zeros(B, 10).to(pixel_values.device)
-
-        # Localization is shared
-        localization_logits = self.localization_head(pooled_features)
-        localization_mask = localization_logits.view(B, 1, 1, 1)
-        localization_mask = F.interpolate(
-            localization_mask, 
-            size=(H, W), 
-            mode='bilinear', 
-            align_corners=False
-        )
-        outputs["localization_mask"] = localization_mask
-
-        if return_features:
-            outputs["pooled_features"] = pooled_features
+        bhep_outputs = self.bhep_head(pooled_features)
+        outputs.update(bhep_outputs)
+        outputs["identification_logits"] = torch.log(bhep_outputs["b_ver"] + 1e-9)
 
         return outputs
+
 
 
 class BHEPLoss(nn.Module):
@@ -269,7 +193,6 @@ class BHEPLoss(nn.Module):
         self.lambda_edl = lambda_edl
         self.lambda_kl = lambda_kl
         self.bce = nn.BCEWithLogitsLoss()
-        self.localization_loss_fn = nn.BCEWithLogitsLoss()
 
     def edl_loss(self, alpha, y):
         """EDL-MSE Loss for labeled fake samples."""
@@ -303,14 +226,6 @@ class BHEPLoss(nn.Module):
         # 1. Detection Loss (Main Task)
         label_det = targets['is_fake'].float().view(-1, 1)
         loss_det = self.bce(outputs['final_logit'], label_det)
-        
-        # 2. Localization Loss
-        loss_loc = 0.0
-        if 'mask_labels' in targets:
-             loss_loc = self.localization_loss_fn(
-                 outputs['localization_mask'], 
-                 targets['mask_labels'].float()
-             )
 
         # 3. BHEP Specific Losses
         loss_fam = 0.0
@@ -350,7 +265,6 @@ class BHEPLoss(nn.Module):
 
         total_loss = (
             loss_det + 
-            loss_loc + 
             self.lambda_edl * (loss_fam + loss_ver) * 0.0 # Temporarily disable EDL weight if no labels
             + self.lambda_kl * (loss_fam + loss_ver)      # Apply KL for real samples
         )
@@ -362,7 +276,6 @@ class BHEPLoss(nn.Module):
         return {
             "loss": total_loss,
             "detection_loss": loss_det.item(),
-            "localization_loss": loss_loc.item() if isinstance(loss_loc, torch.Tensor) else loss_loc,
             "bhep_fam_loss": loss_fam.item() if isinstance(loss_fam, torch.Tensor) else loss_fam,
             "bhep_ver_loss": loss_ver.item() if isinstance(loss_ver, torch.Tensor) else loss_ver
         }

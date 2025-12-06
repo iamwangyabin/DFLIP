@@ -59,7 +59,7 @@ pip install -r requirements.txt
 
 ```bash
 # Convert your DFLIP-3K dataset to the required format
-python dflip_dataset/build_dflip3k.py \
+python dataset/build_dflip3k.py \
     --data-root /path/to/dflip3k \
     --output assets/dflip3k_meta.json \
     --validate-images
