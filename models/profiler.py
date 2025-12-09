@@ -2,11 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional
-from pathlib import Path
 
 from peft import get_peft_model, LoraConfig, PeftModel
 from .vision_encoder import TimmMultiLevelEncoder
-
 
 class BayesianEvidenceClassifier(nn.Module):
     """
@@ -62,7 +60,6 @@ class BayesianEvidenceClassifier(nn.Module):
 
         evidence_fam = self.family_head(features)
         alpha_fam = evidence_fam + 1.0
-        
         S_fam = torch.sum(alpha_fam, dim=1, keepdim=True)
         b_fam = alpha_fam / S_fam  # Belief
         u_fam = self.num_families / S_fam  # Uncertainty
@@ -71,11 +68,9 @@ class BayesianEvidenceClassifier(nn.Module):
 
         ver_input = torch.cat([features, b_fam], dim=1)
         evidence_ver_raw = self.version_head(ver_input)
-
         gate = torch.matmul(b_fam, self.hierarchy_mask)
         evidence_ver = evidence_ver_raw * gate
         alpha_ver = evidence_ver + 1.0
-        
         S_ver = torch.sum(alpha_ver, dim=1, keepdim=True)
         b_ver = alpha_ver / S_ver
         u_ver = self.num_versions / S_ver
@@ -98,15 +93,21 @@ class BayesianEvidenceClassifier(nn.Module):
             w_ver  * logit_ver
         )
 
+        # Generate family and version logits for direct multi-class classification
+        family_logits = torch.log(b_fam + 1e-9)   # (B, num_families)
+        version_logits = torch.log(b_ver + 1e-9)  # (B, num_versions)
+
         return {
             "detection_logits": torch.cat([-final_logit, final_logit], dim=1), # For compatibility (B, 2)
             "final_logit": final_logit,   # (B, 1)
+            "family_logits": family_logits,
+            "version_logits": version_logits,
             "alpha_fam": alpha_fam,
             "alpha_ver": alpha_ver,
+            "b_fam": b_fam,
+            "b_ver": b_ver,
             "weights": norm_weights,
             "uncertainties": uncertainties,
-            "b_fam": b_fam,
-            "b_ver": b_ver
         }
 
 
@@ -175,14 +176,8 @@ class DFLIPProfiler(nn.Module):
               f"({100 * trainable_params / total_params:.2f}%)")
 
     def forward(self, pixel_values: torch.Tensor, return_features: bool = False) -> Dict[str, torch.Tensor]:
-        B, C, H, W = pixel_values.shape
         pooled_features = self.vision_encoder(pixel_values)
-
-        outputs = {}
-        bhep_outputs = self.bhep_head(pooled_features)
-        outputs.update(bhep_outputs)
-        outputs["identification_logits"] = torch.log(bhep_outputs["b_ver"] + 1e-9)
-
+        outputs = self.bhep_head(pooled_features)
         return outputs
 
 
@@ -223,55 +218,33 @@ class BHEPLoss(nn.Module):
         targets: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
         
-        # 1. Detection Loss (Main Task)
         label_det = targets['is_fake'].float().view(-1, 1)
+
         loss_det = self.bce(outputs['final_logit'], label_det)
 
-        # 3. BHEP Specific Losses
         loss_fam = 0.0
         loss_ver = 0.0
-        
-        # Check if we have EDL outputs
-        if 'alpha_fam' in outputs:
-            is_fake = (label_det.squeeze() == 1)
-            is_real = (label_det.squeeze() == 0)
-            
-            # --- Handle Fake Samples ---
-            if is_fake.sum() > 0:
-                # If we have fine-grained labels, use EDL loss
-                if 'label_fam' in targets and 'label_ver' in targets:
-                    alpha_fam = outputs['alpha_fam'][is_fake]
-                    target_fam = targets['label_fam'][is_fake]
-                    loss_fam += self.edl_loss(alpha_fam, target_fam)
-                    
-                    alpha_ver = outputs['alpha_ver'][is_fake]
-                    target_ver = targets['label_ver'][is_fake]
-                    loss_ver += self.edl_loss(alpha_ver, target_ver)
-                else:
-                    # If no fine-grained labels (current dataset), 
-                    # we can't supervise family/version directly for fake.
-                    # Optionally, we could treat them as OOD or just ignore.
-                    # Here we ignore to avoid noise.
-                    pass
 
-            # --- Handle Real Samples ---
-            # Real samples should have high uncertainty (Max Entropy) in generator branches
-            if is_real.sum() > 0:
-                alpha_fam_real = outputs['alpha_fam'][is_real]
-                loss_fam += self.max_entropy_loss(alpha_fam_real)
-                
-                alpha_ver_real = outputs['alpha_ver'][is_real]
-                loss_ver += self.max_entropy_loss(alpha_ver_real)
+        is_fake = (label_det.squeeze() == 1)
+        is_real = (label_det.squeeze() == 0)
 
-        total_loss = (
-            loss_det + 
-            self.lambda_edl * (loss_fam + loss_ver) * 0.0 # Temporarily disable EDL weight if no labels
-            + self.lambda_kl * (loss_fam + loss_ver)      # Apply KL for real samples
-        )
-        
-        # If we have labels, enable EDL weight
-        if 'label_fam' in targets:
-             total_loss += self.lambda_edl * (loss_fam + loss_ver)
+        if is_fake.sum() > 0:
+            alpha_fam = outputs['alpha_fam'][is_fake]
+            target_fam = targets['label_fam'][is_fake]
+            loss_fam += self.edl_loss(alpha_fam, target_fam)
+
+            alpha_ver = outputs['alpha_ver'][is_fake]
+            target_ver = targets['label_ver'][is_fake]
+            loss_ver += self.edl_loss(alpha_ver, target_ver)
+
+        if is_real.sum() > 0:
+            alpha_fam_real = outputs['alpha_fam'][is_real]
+            loss_fam += self.max_entropy_loss(alpha_fam_real)
+
+            alpha_ver_real = outputs['alpha_ver'][is_real]
+            loss_ver += self.max_entropy_loss(alpha_ver_real)
+
+        total_loss = (loss_det + self.lambda_edl * (loss_fam + loss_ver))
 
         return {
             "loss": total_loss,
@@ -279,6 +252,7 @@ class BHEPLoss(nn.Module):
             "bhep_fam_loss": loss_fam.item() if isinstance(loss_fam, torch.Tensor) else loss_fam,
             "bhep_ver_loss": loss_ver.item() if isinstance(loss_ver, torch.Tensor) else loss_ver
         }
+
 
 
 def create_profiler(config: Dict) -> DFLIPProfiler:
