@@ -89,7 +89,11 @@ def parse_args():
         "--train-ratio",
         type=float,
         default=0.8,
-        help="Train ratio (val/test fixed to 0.1/0.1 like original script)",
+        help=(
+            "Train/test split ratio. "
+            "This script only produces 'train' and 'test' splits; "
+            "validation data should be sampled from the train split in training code."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -258,7 +262,12 @@ def build_metadata(args):
 
 
 def split_dataset(records: List[Dict], train_ratio: float = 0.8, seed: int = 42) -> List[Dict]:
-    """Split into train/val/test with ratios train_ratio / 0.1 / 0.1."""
+    """Split into train/test according to train_ratio.
+
+    This function no longer creates a separate "val" split. If you need a
+    validation set, you should sample it from the "train" split externally
+    (e.g. in the training/dataloader code).
+    """
 
     random.seed(seed)
     random.shuffle(records)
@@ -268,24 +277,21 @@ def split_dataset(records: List[Dict], train_ratio: float = 0.8, seed: int = 42)
         raise RuntimeError("No records to split.")
 
     train_end = int(train_ratio * n)
-    val_end = int(train_ratio * n + 0.1 * n)
 
     for i, r in enumerate(records):
         if i < train_end:
             r["split"] = "train"
-        elif i < val_end:
-            r["split"] = "val"
         else:
             r["split"] = "test"
 
     # Print statistics
-    cnt = {"train": 0, "val": 0, "test": 0}
+    cnt = {"train": 0, "test": 0}
     for r in records:
         cnt[r["split"]] += 1
 
     total = float(n)
     print("\nDataset split:")
-    for k in ["train", "val", "test"]:
+    for k in ["train", "test"]:
         v = cnt[k]
         print(f"  {k}: {v} ({100.0 * v / total:.1f}%)")
 
