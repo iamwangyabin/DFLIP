@@ -1,167 +1,210 @@
 #!/usr/bin/env python3
-"""Pack DFLIP-style image dataset into a HuggingFace Datasets Arrow dataset.
+"""Pack DFLIP image dataset into a HuggingFace Datasets format with path indexing.
 
-This script reads an existing metadata JSON (e.g. dflip3k_meta.json) and the
-corresponding image directory, and packs them into a HuggingFace DatasetDict
-with Arrow backing files. This greatly reduces random small-file I/O during
-training, similar to typical HuggingFace image datasets.
+This script directly scans 'fake' and 'real' folders, packs all images into a
+HuggingFace Dataset, and creates a path index for fast image retrieval.
 
 Usage example:
 
     python tools/pack_dflip3k_to_hfds.py \
-        --metadata ./assets/dflip3k_meta.json \
-        --image-root /home/data/yabin/DFLIP3K \
+        --data-root /home/data/yabin/DFLIP3K \
         --output /home/data/yabin/datasets/dflip3k_hfds
 
-After running this script, you can load the dataset in two ways:
+The data-root should contain 'fake' and 'real' subdirectories.
 
-1) Directly with HuggingFace Datasets:
+After packing, you can quickly access images by path:
 
     from datasets import load_from_disk
-    ds_dict = load_from_disk('/home/data/yabin/datasets/dflip3k_hfds')
-    train_ds = ds_dict['train']
-
-2) Via this repo's HFProfilingDataset wrapper (see dataset/profiling_dataset.py)
-
-Note: This script expects the metadata format produced by
-`tools/generate_dataset_meta.py` or `tools/generate_dataset_meta_dflip3k.py`.
+    import json
+    
+    # Load dataset
+    ds = load_from_disk('/path/to/output')
+    
+    # Load path index
+    with open('/path/to/output/path_index.json') as f:
+        path_to_idx = json.load(f)
+    
+    # Get image by path
+    idx = path_to_idx['fake/family_001/v1/img001.png']
+    image = ds['all'][idx]['image']
 """
 
 import argparse
 import json
 import os
+from pathlib import Path
 from typing import Dict, List
 
 from datasets import Dataset, DatasetDict, Features, Image, Value
+from tqdm import tqdm
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pack DFLIP dataset to HF Datasets format")
-    parser.add_argument(
-        "--metadata",
-        type=str,
-        required=True,
-        help="Path to metadata JSON file (e.g. ./assets/dflip3k_meta.json)",
+    parser = argparse.ArgumentParser(
+        description="Pack DFLIP dataset (fake/real folders) to HF Datasets format with path indexing"
     )
     parser.add_argument(
-        "--image-root",
+        "--data-root",
         type=str,
         required=True,
-        help="Root directory of images used in metadata (config.data.image_root)",
+        help="Root directory containing 'fake' and 'real' subdirectories",
     )
     parser.add_argument(
         "--output",
         type=str,
         required=True,
-        help="Output directory for HF dataset (will be created, e.g. ./assets/dflip3k_hfds)",
+        help="Output directory for HF dataset (will be created)",
     )
     parser.add_argument(
-        "--split-names",
+        "--image-extensions",
         type=str,
-        default="train,val,test",
-        help=(
-            "Comma-separated list of valid split names. "
-            "Any record whose split is not in this list will be mapped to 'train'. "
-            "Default: 'train,val,test'."
-        ),
+        nargs="+",
+        default=[".jpg", ".jpeg", ".png", ".bmp", ".webp"],
+        help="Image file extensions to include (default: .jpg .jpeg .png .bmp .webp)",
     )
     return parser.parse_args()
 
 
-def load_metadata(path: str) -> List[Dict]:
-    with open(path, "r", encoding="utf-8") as f:
-        records = json.load(f)
-    if not isinstance(records, list):
-        raise RuntimeError(f"Metadata file {path} does not contain a list of records.")
-    print(f"Loaded {len(records)} records from {path}")
-    return records
+def scan_images(
+    data_root: Path, image_extensions: List[str]
+) -> List[Dict]:
+    """Scan fake and real folders for all images.
+    
+    Returns:
+        List of samples with image path, relative path, and label
+    """
+    fake_dir = data_root / "fake"
+    real_dir = data_root / "real"
+    
+    if not fake_dir.exists():
+        raise NotADirectoryError(f"Fake directory not found: {fake_dir}")
+    if not real_dir.exists():
+        raise NotADirectoryError(f"Real directory not found: {real_dir}")
+    
+    samples = []
+    
+    # Scan fake folder
+    print(f"\nScanning fake images in {fake_dir}...")
+    fake_images = [
+        img for img in fake_dir.rglob("*")
+        if img.is_file() and img.suffix.lower() in image_extensions
+    ]
+    for img_path in tqdm(fake_images, desc="Processing fake images"):
+        rel_path = img_path.relative_to(data_root)
+        samples.append({
+            "abs_path": str(img_path),
+            "rel_path": str(rel_path).replace("\\", "/"),  # Use forward slash
+            "is_fake": 1,
+        })
+    
+    # Scan real folder
+    print(f"\nScanning real images in {real_dir}...")
+    real_images = [
+        img for img in real_dir.rglob("*")
+        if img.is_file() and img.suffix.lower() in image_extensions
+    ]
+    for img_path in tqdm(real_images, desc="Processing real images"):
+        rel_path = img_path.relative_to(data_root)
+        samples.append({
+            "abs_path": str(img_path),
+            "rel_path": str(rel_path).replace("\\", "/"),  # Use forward slash
+            "is_fake": 0,
+        })
+    
+    print(f"\nFound {len(fake_images)} fake images")
+    print(f"Found {len(real_images)} real images")
+    print(f"Total: {len(samples)} images")
+    
+    return samples
 
 
 def main() -> None:
     args = parse_args()
 
-    metadata_path = os.path.abspath(args.metadata)
-    image_root = os.path.abspath(args.image_root)
-    output_path = os.path.abspath(args.output)
+    data_root = Path(args.data_root).resolve()
+    output_path = Path(args.output).resolve()
 
-    print("=== Pack DFLIP dataset to HF Datasets ===")
-    print(f"metadata:   {metadata_path}")
-    print(f"image_root: {image_root}")
-    print(f"output:     {output_path}")
+    print("=" * 70)
+    print("Pack DFLIP dataset to HF Datasets with Path Indexing")
+    print("=" * 70)
+    print(f"Data root:     {data_root}")
+    print(f"Output:        {output_path}")
+    print(f"Extensions:    {args.image_extensions}")
+    print("=" * 70)
 
-    if not os.path.isfile(metadata_path):
-        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-    if not os.path.isdir(image_root):
-        raise NotADirectoryError(f"Image root not found or not a directory: {image_root}")
+    if not data_root.is_dir():
+        raise NotADirectoryError(f"Data root not found: {data_root}")
 
-    records = load_metadata(metadata_path)
+    # Scan all images from fake and real folders
+    samples = scan_images(data_root, args.image_extensions)
+    
+    if not samples:
+        raise RuntimeError("No images found in fake or real folders!")
 
-    # Prepare split containers
-    valid_splits = [s.strip() for s in args.split_names.split(",") if s.strip()]
-    if not valid_splits:
-        valid_splits = ["train", "val", "test"]
-    print(f"Valid splits: {valid_splits}")
+    # Prepare dataset samples
+    print(f"\nPreparing {len(samples)} samples for HF Dataset...")
+    dataset_samples = []
+    for sample in samples:
+        dataset_samples.append({
+            "image": sample["abs_path"],
+            "image_path": sample["rel_path"],
+            "is_fake": sample["is_fake"],
+        })
 
-    splits: Dict[str, List[Dict]] = {s: [] for s in valid_splits}
+    # Define HF features
+    features = Features({
+        "image": Image(),
+        "image_path": Value("string"),  # Relative path for indexing
+        "is_fake": Value("int8"),
+    })
 
-    # Fill split data
-    missing_count = 0
-    for r in records:
-        split = r.get("split", "train")
-        if split not in valid_splits:
-            # Map unknown split to 'train' (defensive handling)
-            missing_count += 1
-            split = valid_splits[0]
+    # Build HF dataset (single 'all' split, no train/val division)
+    print(f"\nBuilding HF Dataset with {len(dataset_samples)} samples...")
+    hf_dataset = Dataset.from_list(dataset_samples, features=features)
+    
+    # Wrap in DatasetDict
+    hf_ds = DatasetDict({"all": hf_dataset})
 
-        img_rel = r["image_path"]
-        img_abs = os.path.join(image_root, img_rel)
+    # Create path index: image_path -> index
+    print("\nCreating path index...")
+    path_to_idx = {sample["image_path"]: idx for idx, sample in enumerate(dataset_samples)}
 
-        sample = {
-            "image": img_abs,  # datasets.Image will load from this path and store bytes
-            "is_fake": int(r["is_fake"]),
-            # Use -1 for real images (None in metadata)
-            "family_id": -1 if r.get("family_id") is None else int(r["family_id"]),
-            "version_id": -1 if r.get("version_id") is None else int(r["version_id"]),
-            "split": split,
-        }
-        splits[split].append(sample)
-
-    total_after = sum(len(v) for v in splits.values())
-    print("Samples per split (before HF construction):")
-    for s in valid_splits:
-        print(f"  {s}: {len(splits[s])}")
-    if missing_count > 0:
-        print(f"[Info] {missing_count} samples had unknown split; mapped to '{valid_splits[0]}'")
-
-    # Define HF features. We keep labels as numeric for direct training use.
-    features = Features(
-        {
-            "image": Image(),
-            "is_fake": Value("int8"),
-            "family_id": Value("int32"),
-            "version_id": Value("int32"),
-            "split": Value("string"),
-        }
-    )
-
-    hf_splits: Dict[str, Dataset] = {}
-    for split_name, rows in splits.items():
-        if not rows:
-            print(f"[Warning] split '{split_name}' has 0 samples; skipping.")
-            continue
-        print(f"Building HF Dataset for split '{split_name}' with {len(rows)} samples...")
-        hf_splits[split_name] = Dataset.from_list(rows, features=features)
-
-    if not hf_splits:
-        raise RuntimeError("No non-empty splits to build HF Dataset from. Check your metadata.")
-
-    hf_ds = DatasetDict(hf_splits)
-
-    # Save to disk
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    print(f"Saving HF DatasetDict to {output_path} ...")
-    hf_ds.save_to_disk(output_path)
-    print("Done. You can now load it via datasets.load_from_disk(output_path).")
+    # Save dataset to disk
+    output_path.mkdir(parents=True, exist_ok=True)
+    print(f"\nSaving HF DatasetDict to {output_path}...")
+    hf_ds.save_to_disk(str(output_path))
+    
+    # Save path index to JSON
+    index_file = output_path / "path_index.json"
+    print(f"Saving path index to {index_file}...")
+    with open(index_file, "w", encoding="utf-8") as f:
+        json.dump(path_to_idx, f, ensure_ascii=False, indent=2)
+    
+    print("\n" + "=" * 70)
+    print("✓ Done!")
+    print("=" * 70)
+    print(f"\nDataset saved to: {output_path}")
+    print(f"Path index saved to: {index_file}")
+    print(f"\nDataset info:")
+    print(f"  - Total images: {len(dataset_samples)}")
+    print(f"  - Fake images:  {sum(1 for s in dataset_samples if s['is_fake'])}")
+    print(f"  - Real images:  {sum(1 for s in dataset_samples if not s['is_fake'])}")
+    print(f"\nUsage example:")
+    print(f"  from datasets import load_from_disk")
+    print(f"  import json")
+    print(f"  ")
+    print(f"  # Load dataset")
+    print(f"  ds = load_from_disk('{output_path}')")
+    print(f"  ")
+    print(f"  # Load path index")
+    print(f"  with open('{index_file}') as f:")
+    print(f"      path_to_idx = json.load(f)")
+    print(f"  ")
+    print(f"  # Get image by path")
+    print(f"  image_path = 'fake/family_001/v1/img001.png'")
+    print(f"  idx = path_to_idx[image_path]")
+    print(f"  image = ds['all'][idx]['image']")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
