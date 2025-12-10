@@ -129,41 +129,58 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dic
 
 
 def consolidate_to_json(fake_root: Path, output_path: Path, max_sample: int = None):
-    """流式整合所有JSON到一个大JSON文件"""
+    """流式整合所有JSON到一个大JSON文件（实时写入，避免内存占用过大）"""
     print(f"\n📦 流式整合JSON文件到大JSON...")
     
-    consolidated = []
     count = 0
     
-    # 使用生成器流式处理
-    pbar = tqdm(desc="📦 整合JSON", unit="个", ncols=100, colour='cyan')
-    for json_path in iter_json_files(fake_root, max_sample):
-        data = load_json_file(json_path)
-        if data:
-            # 添加元数据
-            try:
-                rel_path = json_path.relative_to(fake_root)
-                data['_meta_json_path'] = str(rel_path)
-                data['_meta_filename'] = json_path.name
-                
-                # 提取family和submodel
-                if len(rel_path.parts) >= 2:
-                    data['_meta_family'] = rel_path.parts[0]
-                    data['_meta_submodel'] = rel_path.parts[1]
-            except ValueError:
-                data['_meta_json_path'] = str(json_path)
-            
-            consolidated.append(data)
-            count += 1
-            pbar.update(1)
-    pbar.close()
-    
-    # 保存为JSON
-    print(f"💾 保存到 {output_path}...")
     # 确保输出目录存在
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 流式写入JSON数组
+    print(f"💾 流式写入到 {output_path}...")
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(consolidated, f, ensure_ascii=False, indent=2)
+        # 写入数组开始符号
+        f.write('[\n')
+        
+        # 使用生成器流式处理
+        pbar = tqdm(desc="📦 整合JSON", unit="个", ncols=100, colour='cyan')
+        first_item = True
+        
+        for json_path in iter_json_files(fake_root, max_sample):
+            data = load_json_file(json_path)
+            if data:
+                # 添加元数据
+                try:
+                    rel_path = json_path.relative_to(fake_root)
+                    data['_meta_json_path'] = str(rel_path)
+                    data['_meta_filename'] = json_path.name
+                    
+                    # 提取family和submodel
+                    if len(rel_path.parts) >= 2:
+                        data['_meta_family'] = rel_path.parts[0]
+                        data['_meta_submodel'] = rel_path.parts[1]
+                except ValueError:
+                    data['_meta_json_path'] = str(json_path)
+                
+                # 写入JSON对象（不是第一个则添加逗号）
+                if not first_item:
+                    f.write(',\n')
+                else:
+                    first_item = False
+                
+                # 将字典序列化为JSON字符串并写入，带缩进
+                json_str = json.dumps(data, ensure_ascii=False, indent=2)
+                # 添加缩进使格式更美观
+                indented_lines = '\n'.join('  ' + line for line in json_str.split('\n'))
+                f.write(indented_lines)
+                
+                count += 1
+                pbar.update(1)
+        
+        # 写入数组结束符号
+        f.write('\n]\n')
+        pbar.close()
     
     print(f"✅ 成功保存 {count} 条记录到 {output_path}")
     print(f"   文件大小: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
