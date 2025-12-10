@@ -8,6 +8,7 @@
 import argparse
 from pathlib import Path
 from typing import List, Tuple
+from tqdm import tqdm
 
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -38,7 +39,8 @@ def collect_image_files(root: Path) -> List[Path]:
         print(f"[错误] 目录不存在: {root}")
         return files
     
-    for p in root.rglob("*"):
+    print("正在扫描图片文件...")
+    for p in tqdm(list(root.rglob("*")), desc="扫描文件", unit="文件"):
         if is_image_file(p):
             files.append(p)
     return files
@@ -62,7 +64,8 @@ def check_json_files(fake_root: Path) -> Tuple[int, int, List[Path]]:
     no_json = 0
     missing_json_files: List[Path] = []
     
-    for img_path in image_files:
+    print("\n正在检查JSON文件...")
+    for img_path in tqdm(image_files, desc="检查JSON", unit="图片"):
         # 构造对应的JSON文件路径（去掉图片扩展名，加上.json）
         json_path = img_path.with_suffix('.json')
         
