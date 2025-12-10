@@ -160,6 +160,8 @@ def consolidate_to_json(fake_root: Path, output_path: Path, max_sample: int = No
     
     # 保存为JSON
     print(f"💾 保存到 {output_path}...")
+    # 确保输出目录存在
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(consolidated, f, ensure_ascii=False, indent=2)
     
@@ -187,6 +189,8 @@ def consolidate_to_csv(fake_root: Path, output_path: Path, max_sample: int = Non
     print(f"💾 流式写入到 {output_path}...")
     count = 0
     
+    # 确保输出目录存在
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=sorted_keys, extrasaction='ignore')
         writer.writeheader()
