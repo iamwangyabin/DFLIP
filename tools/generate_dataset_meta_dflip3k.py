@@ -166,6 +166,15 @@ def build_label_maps(
     print(f"\nTotal families: {len(family_names)}")
     print(f"Total versions: {current_vid}")
 
+    # Print id-to-name mappings for easier inspection
+    print("\nFamily id mapping (family_id -> family_name):")
+    for fam_name, fam_id in sorted(family_to_id.items(), key=lambda x: x[1]):
+        print(f"  {fam_id}: {fam_name}")
+
+    print("\nVersion id mapping (version_id -> family_name/submodel_name):")
+    for (fam_name, sub_name), vid in sorted(version_id_map.items(), key=lambda x: x[1]):
+        print(f"  {vid}: {fam_name}/{sub_name}")
+
     return family_to_id, version_id_map, hierarchy
 
 
