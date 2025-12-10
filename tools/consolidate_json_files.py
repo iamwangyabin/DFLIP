@@ -53,27 +53,29 @@ def parse_args():
     return parser.parse_args()
 
 
-def collect_json_files(root: Path, max_sample: int = None) -> List[Path]:
-    """递归收集所有JSON文件"""
-    files: List[Path] = []
+def iter_json_files(root: Path, max_sample: int = None):
+    """生成器：边遍历边yield JSON文件，避免重复IO"""
     if not root.exists():
         print(f"[错误] 目录不存在: {root}")
-        return files
+        return
     
-    print("📂 正在扫描JSON文件...")
-    all_files = list(root.rglob("*.json"))
+    print("📂 开始流式处理JSON文件...")
     
-    if max_sample and len(all_files) > max_sample:
+    # 如果有max_sample限制，需要先收集再采样
+    if max_sample:
+        all_files = list(root.rglob("*.json"))
         print(f"[采样] 从{len(all_files)}个文件中采样{max_sample}个")
         import random
         random.seed(42)
-        all_files = random.sample(all_files, max_sample)
-    
-    for p in tqdm(all_files, desc="📂 扫描JSON文件", unit="个", ncols=100, colour='green'):
-        if p.is_file():
-            files.append(p)
-    
-    return files
+        sampled = random.sample(all_files, min(max_sample, len(all_files)))
+        for p in sampled:
+            if p.is_file():
+                yield p
+    else:
+        # 流式处理，边遍历边yield
+        for p in root.rglob("*.json"):
+            if p.is_file():
+                yield p
 
 
 def load_json_file(json_path: Path) -> Dict[str, Any]:
@@ -87,17 +89,27 @@ def load_json_file(json_path: Path) -> Dict[str, Any]:
         return {}
 
 
-def analyze_json_structure(json_files: List[Path], sample_size: int = 100) -> Set[str]:
-    """分析JSON结构，获取所有可能的字段"""
+def analyze_json_structure(root: Path, sample_size: int = 100) -> Set[str]:
+    """快速采样分析JSON结构，获取所有可能的字段"""
     all_keys = set()
-    sample_files = json_files[:sample_size] if len(json_files) > sample_size else json_files
+    count = 0
     
-    print(f"\n🔍 分析JSON结构 (采样{len(sample_files)}个文件)...")
-    for json_path in tqdm(sample_files, desc="🔍 分析结构", unit="个", ncols=100, colour='blue'):
-        data = load_json_file(json_path)
-        if data:
-            all_keys.update(flatten_dict(data).keys())
+    print(f"\n🔍 快速采样分析JSON结构 (最多{sample_size}个文件)...")
     
+    # 使用生成器，采样指定数量的文件
+    pbar = tqdm(desc="🔍 采样分析", unit="个", ncols=100, colour='blue')
+    for json_path in root.rglob("*.json"):
+        if count >= sample_size:
+            break
+        if json_path.is_file():
+            data = load_json_file(json_path)
+            if data:
+                all_keys.update(flatten_dict(data).keys())
+            count += 1
+            pbar.update(1)
+    pbar.close()
+    
+    print(f"   从{count}个文件中发现字段")
     return all_keys
 
 
@@ -116,13 +128,16 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dic
     return dict(items)
 
 
-def consolidate_to_json(json_files: List[Path], fake_root: Path, output_path: Path):
-    """整合所有JSON到一个大JSON文件"""
-    print(f"\n📦 正在整合 {len(json_files)} 个JSON文件到大JSON...")
+def consolidate_to_json(fake_root: Path, output_path: Path, max_sample: int = None):
+    """流式整合所有JSON到一个大JSON文件"""
+    print(f"\n📦 流式整合JSON文件到大JSON...")
     
     consolidated = []
+    count = 0
     
-    for json_path in tqdm(json_files, desc="📦 整合JSON", unit="个", ncols=100, colour='cyan'):
+    # 使用生成器流式处理
+    pbar = tqdm(desc="📦 整合JSON", unit="个", ncols=100, colour='cyan')
+    for json_path in iter_json_files(fake_root, max_sample):
         data = load_json_file(json_path)
         if data:
             # 添加元数据
@@ -139,22 +154,25 @@ def consolidate_to_json(json_files: List[Path], fake_root: Path, output_path: Pa
                 data['_meta_json_path'] = str(json_path)
             
             consolidated.append(data)
+            count += 1
+            pbar.update(1)
+    pbar.close()
     
     # 保存为JSON
     print(f"💾 保存到 {output_path}...")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(consolidated, f, ensure_ascii=False, indent=2)
     
-    print(f"✅ 成功保存 {len(consolidated)} 条记录到 {output_path}")
+    print(f"✅ 成功保存 {count} 条记录到 {output_path}")
     print(f"   文件大小: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
 
 
-def consolidate_to_csv(json_files: List[Path], fake_root: Path, output_path: Path):
-    """整合所有JSON到CSV文件"""
-    print(f"\n📊 正在整合 {len(json_files)} 个JSON文件到CSV...")
+def consolidate_to_csv(fake_root: Path, output_path: Path, max_sample: int = None):
+    """流式整合所有JSON到CSV文件"""
+    print(f"\n📊 流式整合JSON文件到CSV...")
     
-    # 首先分析所有字段
-    all_keys = analyze_json_structure(json_files)
+    # 第一步：快速采样分析字段结构
+    all_keys = analyze_json_structure(fake_root, sample_size=100)
     
     # 添加元数据字段
     meta_fields = ['_meta_json_path', '_meta_filename', '_meta_family', '_meta_submodel']
@@ -165,13 +183,17 @@ def consolidate_to_csv(json_files: List[Path], fake_root: Path, output_path: Pat
     
     print(f"📋 发现 {len(sorted_keys)} 个字段")
     
-    # 写入CSV
-    print(f"💾 保存到 {output_path}...")
+    # 第二步：流式写入CSV
+    print(f"💾 流式写入到 {output_path}...")
+    count = 0
+    
     with open(output_path, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=sorted_keys, extrasaction='ignore')
         writer.writeheader()
         
-        for json_path in tqdm(json_files, desc="📊 写入CSV", unit="个", ncols=100, colour='magenta'):
+        # 使用生成器流式处理
+        pbar = tqdm(desc="📊 写入CSV", unit="个", ncols=100, colour='magenta')
+        for json_path in iter_json_files(fake_root, max_sample):
             data = load_json_file(json_path)
             if data:
                 # 扁平化数据
@@ -190,8 +212,11 @@ def consolidate_to_csv(json_files: List[Path], fake_root: Path, output_path: Pat
                     flat_data['_meta_json_path'] = str(json_path)
                 
                 writer.writerow(flat_data)
+                count += 1
+                pbar.update(1)
+        pbar.close()
     
-    print(f"✅ 成功保存 {len(json_files)} 条记录到 {output_path}")
+    print(f"✅ 成功保存 {count} 条记录到 {output_path}")
     print(f"   文件大小: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
 
 
@@ -206,27 +231,17 @@ def main():
     print(f"📂 处理目录: {fake_root}\n")
     print("="*70)
     
-    # 收集JSON文件
-    json_files = collect_json_files(fake_root, args.max_sample)
-    
-    if not json_files:
-        print("❌ 没有找到任何JSON文件")
-        return
-    
-    print(f"\n✅ 找到 {len(json_files)} 个JSON文件")
-    print("="*70)
-    
     # 确定输出格式
     output_path = Path(args.output)
     
     if args.format == "both" or (args.format == "both" and not output_path.suffix):
-        # 生成两种格式
+        # 生成两种格式（流式处理，避免重复IO）
         base_path = output_path.with_suffix('')
         csv_path = base_path.with_suffix('.csv')
         json_path = base_path.with_suffix('.json')
         
-        consolidate_to_csv(json_files, fake_root, csv_path)
-        consolidate_to_json(json_files, fake_root, json_path)
+        consolidate_to_csv(fake_root, csv_path, args.max_sample)
+        consolidate_to_json(fake_root, json_path, args.max_sample)
         
         print("\n" + "="*70)
         print("🎉 整合完成！")
@@ -235,9 +250,9 @@ def main():
         print(f"📦 JSON文件: {json_path}")
         
     elif args.format == "csv" or (output_path.suffix.lower() == '.csv'):
-        # 只生成CSV
+        # 只生成CSV（流式处理）
         csv_path = output_path.with_suffix('.csv')
-        consolidate_to_csv(json_files, fake_root, csv_path)
+        consolidate_to_csv(fake_root, csv_path, args.max_sample)
         
         print("\n" + "="*70)
         print("🎉 整合完成！")
@@ -245,9 +260,9 @@ def main():
         print(f"📊 CSV文件: {csv_path}")
         
     elif args.format == "json" or (output_path.suffix.lower() == '.json'):
-        # 只生成JSON
+        # 只生成JSON（流式处理）
         json_path = output_path.with_suffix('.json')
-        consolidate_to_json(json_files, fake_root, json_path)
+        consolidate_to_json(fake_root, json_path, args.max_sample)
         
         print("\n" + "="*70)
         print("🎉 整合完成！")
