@@ -23,6 +23,11 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[".jpg", ".jpeg", ".png", ".bmp", ".webp"],
     )
+    parser.add_argument(
+        "--no-resize",
+        action="store_true",
+        help="Save images in original format without resizing to JPEG (faster processing)",
+    )
     return parser.parse_args()
 
 
@@ -67,10 +72,21 @@ def resize_to_jpeg(img_path: Path) -> bytes:
         return buffer.getvalue()
 
 
-def image_generator(data_root: Path, image_extensions: set) -> Generator[Dict, None, None]:
+def read_original_image(img_path: Path) -> bytes:
+    """
+    直接读取原始图片文件，不做任何处理。
+    返回字节数据。
+    """
+    with open(img_path, 'rb') as f:
+        return f.read()
+
+
+def image_generator(data_root: Path, image_extensions: set, no_resize: bool = False) -> Generator[Dict, None, None]:
     """
     使用生成器(yield)逐个返回样本，避免一次性把所有文件加载到内存列表。
-    处理图片：resize最短边为512，转换为JPEG格式（随机压缩质量和插值算法）。
+    处理图片：
+    - 如果no_resize=True：直接保存原始图片
+    - 如果no_resize=False：resize最短边为512，转换为JPEG格式（随机压缩质量和插值算法）
     """
     data_root = Path(data_root)
     fake_dir = data_root / "fake"
@@ -86,10 +102,14 @@ def image_generator(data_root: Path, image_extensions: set) -> Generator[Dict, N
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
             try:
-                # 处理图片并转换为JPEG字节数据
-                jpeg_bytes = resize_to_jpeg(img_path)
+                # 根据no_resize标志选择处理方式
+                if no_resize:
+                    img_bytes = read_original_image(img_path)
+                else:
+                    img_bytes = resize_to_jpeg(img_path)
+                
                 yield {
-                    "image": {"bytes": jpeg_bytes},  # 直接提供字节数据
+                    "image": {"bytes": img_bytes},  # 直接提供字节数据
                     "image_path": str(rel_path),
                     "is_fake": 1,
                 }
@@ -103,10 +123,14 @@ def image_generator(data_root: Path, image_extensions: set) -> Generator[Dict, N
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
             try:
-                # 处理图片并转换为JPEG字节数据
-                jpeg_bytes = resize_to_jpeg(img_path)
+                # 根据no_resize标志选择处理方式
+                if no_resize:
+                    img_bytes = read_original_image(img_path)
+                else:
+                    img_bytes = resize_to_jpeg(img_path)
+                
                 yield {
-                    "image": {"bytes": jpeg_bytes},  # 直接提供字节数据
+                    "image": {"bytes": img_bytes},  # 直接提供字节数据
                     "image_path": str(rel_path),
                     "is_fake": 0,
                 }
@@ -121,7 +145,9 @@ def main() -> None:
     output_path = Path(args.output).resolve()
     extensions = set(args.image_extensions)
 
+    processing_mode = "original format (no resize)" if args.no_resize else "resize to JPEG (512px shortest side)"
     print(f"Packing dataset from {data_root} to {output_path}")
+    print(f"Processing mode: {processing_mode}")
 
     # 1. 定义 Features
     features = Features({
@@ -134,7 +160,11 @@ def main() -> None:
     # 这样 HuggingFace 会流式地读取图片并写入磁盘，不会撑爆内存
     hf_dataset = Dataset.from_generator(
         generator=image_generator,
-        gen_kwargs={"data_root": data_root, "image_extensions": extensions},
+        gen_kwargs={
+            "data_root": data_root,
+            "image_extensions": extensions,
+            "no_resize": args.no_resize,
+        },
         features=features,
     )
 
