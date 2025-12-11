@@ -270,43 +270,37 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform):
             if "train" not in ds_dict:
                 raise ValueError(f"HF dataset at {hf_root} must contain 'train' split.")
             
-            full_train_dataset = HFProfilingDataset(
-                ds_dict["train"],
-                transform=train_transform,  # Will be replaced per subset
-                config=config
-            )
+            # Load once to get size for splitting
+            full_train_hf = ds_dict["train"]
+            total_size = len(full_train_hf)
         else:
-            full_train_dataset = ProfilingDataset(
+            # Load once to get size for splitting
+            temp_dataset = ProfilingDataset(
                 metadata_path=config["data"]["metadata_path"],
                 image_root=config["data"]["image_root"],
-                transform=train_transform,  # Will be replaced per subset
+                transform=None,  # Don't need transform just to get size
                 split="train",
                 config=config,
             )
+            total_size = len(temp_dataset)
         
         # Split indices
         train_indices, val_indices = split_train_val_indices(
-            len(full_train_dataset),
+            total_size,
             val_split_ratio,
             val_split_seed
         )
         
         print(f"Split sizes - Train: {len(train_indices)}, Val: {len(val_indices)}")
         
-        # Create subsets
-        train_dataset = Subset(full_train_dataset, train_indices)
-        val_dataset = Subset(full_train_dataset, val_indices)
-        
-        # Manually set transforms for subsets (workaround since Subset doesn't have transform attr)
-        # We need to modify the underlying dataset's transform dynamically
-        # Better approach: create separate dataset instances
+        # Create datasets with proper transforms (only create once each)
         if use_hf:
             train_dataset = Subset(
-                HFProfilingDataset(ds_dict["train"], transform=train_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=train_transform, config=config),
                 train_indices
             )
             val_dataset = Subset(
-                HFProfilingDataset(ds_dict["train"], transform=val_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=val_transform, config=config),
                 val_indices
             )
         else:
@@ -325,7 +319,7 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform):
                     metadata_path=config["data"]["metadata_path"],
                     image_root=config["data"]["image_root"],
                     transform=val_transform,
-                    split="train",  # Load from train split
+                    split="train",
                     config=config,
                 ),
                 val_indices
@@ -420,15 +414,16 @@ def create_profiling_dataloaders_ddp(
             full_train_hf = ds_dict["train"]
             total_size = len(full_train_hf)
         else:
-            # Need to load train dataset to get its size
+            # Load once to get size for splitting
             temp_dataset = ProfilingDataset(
                 metadata_path=config["data"]["metadata_path"],
                 image_root=config["data"]["image_root"],
-                transform=None,  # Don't need transform just to count
+                transform=None,  # Don't need transform just to get size
                 split="train",
                 config=config,
             )
             total_size = len(temp_dataset)
+            del temp_dataset  # Free memory after getting size
         
         # Split indices (same across all ranks for consistency)
         train_indices, val_indices = split_train_val_indices(
@@ -440,7 +435,7 @@ def create_profiling_dataloaders_ddp(
         if rank == 0:
             print(f"Split sizes - Train: {len(train_indices)}, Val: {len(val_indices)}")
         
-        # Create datasets with proper transforms
+        # Create datasets with proper transforms (only load data once per dataset)
         if use_hf:
             train_dataset = Subset(
                 HFProfilingDataset(full_train_hf, transform=train_transform, config=config),
