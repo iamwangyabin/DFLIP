@@ -48,8 +48,6 @@ class ProfilingDataset(Dataset):
         # Filter by split
         self.records = [r for r in self.all_records if r.get("split", "train") == split]
 
-        print(f"Loaded {len(self.records)} samples for split '{split}' from {metadata_path}")
-
     def __len__(self):
         return len(self.records)
 
