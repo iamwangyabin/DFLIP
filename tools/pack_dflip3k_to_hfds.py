@@ -2,9 +2,12 @@
 import argparse
 import json
 import os
+import random
+import io
 from pathlib import Path
 from typing import Dict, List, Generator
 
+from PIL import Image as PILImage
 from datasets import Dataset, DatasetDict, Features, Image, Value
 
 
@@ -23,9 +26,51 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resize_to_jpeg(img_path: Path) -> bytes:
+    """
+    将图片resize为最短边512，并转换为JPEG格式（使用随机压缩质量和插值算法）。
+    返回字节数据。
+    """
+    # 随机选择插值算法
+    interpolation_methods = [
+        PILImage.NEAREST,    # 最近邻
+        PILImage.BILINEAR,   # 双线性
+        PILImage.BICUBIC,    # 双三次
+        PILImage.LANCZOS,    # Lanczos
+    ]
+    interp = random.choice(interpolation_methods)
+    
+    # 随机选择JPEG压缩质量 (75-95)
+    quality = random.randint(75, 95)
+    
+    # 打开图片
+    with PILImage.open(img_path) as img:
+        # 转换为RGB（JPEG不支持透明通道）
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # 计算新尺寸（最短边为512）
+        width, height = img.size
+        if width < height:
+            new_width = 512
+            new_height = int(height * (512 / width))
+        else:
+            new_height = 512
+            new_width = int(width * (512 / height))
+        
+        # Resize图片
+        img_resized = img.resize((new_width, new_height), interp)
+        
+        # 转换为JPEG字节
+        buffer = io.BytesIO()
+        img_resized.save(buffer, format='JPEG', quality=quality, optimize=True)
+        return buffer.getvalue()
+
+
 def image_generator(data_root: Path, image_extensions: set) -> Generator[Dict, None, None]:
     """
     使用生成器(yield)逐个返回样本，避免一次性把所有文件加载到内存列表。
+    处理图片：resize最短边为512，转换为JPEG格式（随机压缩质量和插值算法）。
     """
     data_root = Path(data_root)
     fake_dir = data_root / "fake"
@@ -40,22 +85,34 @@ def image_generator(data_root: Path, image_extensions: set) -> Generator[Dict, N
     for img_path in fake_dir.rglob("*"):
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
-            yield {
-                "image": str(img_path),  # 对应 features 中的 Image()
-                "image_path": str(rel_path),  # 对应 features 中的 string
-                "is_fake": 1,
-            }
+            try:
+                # 处理图片并转换为JPEG字节数据
+                jpeg_bytes = resize_to_jpeg(img_path)
+                yield {
+                    "image": {"bytes": jpeg_bytes},  # 直接提供字节数据
+                    "image_path": str(rel_path),
+                    "is_fake": 1,
+                }
+            except Exception as e:
+                print(f"Error processing {img_path}: {e}")
+                continue
 
     # 遍历 Real (流式)
     print(f"Scanning {real_dir}...")
     for img_path in real_dir.rglob("*"):
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
-            yield {
-                "image": str(img_path),
-                "image_path": str(rel_path),
-                "is_fake": 0,
-            }
+            try:
+                # 处理图片并转换为JPEG字节数据
+                jpeg_bytes = resize_to_jpeg(img_path)
+                yield {
+                    "image": {"bytes": jpeg_bytes},  # 直接提供字节数据
+                    "image_path": str(rel_path),
+                    "is_fake": 0,
+                }
+            except Exception as e:
+                print(f"Error processing {img_path}: {e}")
+                continue
 
 
 def main() -> None:
