@@ -98,6 +98,8 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
     # 遍历 Fake (流式)
     print(f"Scanning {fake_dir}...")
     # rglob 返回的是迭代器，不要用 list() 包裹它
+    total_bytes = 0
+    count = 0
     for img_path in fake_dir.rglob("*"):
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
@@ -107,6 +109,12 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
                     img_bytes = read_original_image(img_path)
                 else:
                     img_bytes = resize_to_jpeg(img_path)
+                
+                # DEBUG: Track cumulative size
+                total_bytes += len(img_bytes)
+                count += 1
+                if count % 1000 == 0:
+                    print(f"[DEBUG] Processed {count} images, cumulative size: {total_bytes / (1024**3):.2f} GB, avg size: {total_bytes / count / (1024**2):.2f} MB")
                 
                 yield {
                     "image": {"bytes": img_bytes},  # 直接提供字节数据
@@ -119,6 +127,7 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
 
     # 遍历 Real (流式)
     print(f"Scanning {real_dir}...")
+    print(f"[DEBUG] Fake images total: {count}, total size: {total_bytes / (1024**3):.2f} GB")
     for img_path in real_dir.rglob("*"):
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
@@ -128,6 +137,12 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
                     img_bytes = read_original_image(img_path)
                 else:
                     img_bytes = resize_to_jpeg(img_path)
+                
+                # DEBUG: Track cumulative size
+                total_bytes += len(img_bytes)
+                count += 1
+                if count % 1000 == 0:
+                    print(f"[DEBUG] Processed {count} images, cumulative size: {total_bytes / (1024**3):.2f} GB, avg size: {total_bytes / count / (1024**2):.2f} MB")
                 
                 yield {
                     "image": {"bytes": img_bytes},  # 直接提供字节数据
