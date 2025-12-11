@@ -1,5 +1,5 @@
 model:
-  base_model: "dinov2_vitb14"
+  base_model: "vit_base_patch14_dinov2"
   cache_dir: "./models_cache"
   num_generators: 10
   freeze_encoder: true

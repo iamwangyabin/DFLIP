@@ -62,7 +62,7 @@ from typing import Dict, List, Tuple
 
 class TimmMultiLevelEncoder(nn.Module):
     
-    def __init__(self, model_name: str = "dinov2_vitb14", freeze: bool = True, pretrained: bool = True):
+    def __init__(self, model_name: str = "vit_base_patch14_dinov2", freeze: bool = True, pretrained: bool = True):
         super().__init__()
         
         self.model_name = model_name
