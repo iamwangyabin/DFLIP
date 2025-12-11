@@ -76,10 +76,19 @@ class TimmMultiLevelEncoder(nn.Module):
             out_indices=(0, 1, 2, 3),  # Extract all 4 levels
         )
         
+        # Get the model's expected input size
+        # Most timm models store this in pretrained_cfg or default_cfg
+        if hasattr(self.backbone, 'pretrained_cfg') and self.backbone.pretrained_cfg is not None:
+            input_size = self.backbone.pretrained_cfg.get('input_size', (3, 224, 224))
+        elif hasattr(self.backbone, 'default_cfg') and self.backbone.default_cfg is not None:
+            input_size = self.backbone.default_cfg.get('input_size', (3, 224, 224))
+        else:
+            input_size = (3, 224, 224)
+        
         # Get feature dimensions for each level
         # Create dummy input to infer feature dimensions
         with torch.no_grad():
-            dummy_input = torch.randn(1, 3, 224, 224)
+            dummy_input = torch.randn(1, *input_size)
             dummy_features = self.backbone(dummy_input)
             self.feature_dims = [f.shape[1] for f in dummy_features]
             self.num_levels = len(dummy_features)
