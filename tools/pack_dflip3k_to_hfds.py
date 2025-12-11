@@ -4,6 +4,8 @@ import json
 import os
 import random
 import io
+import time
+import psutil
 from pathlib import Path
 from typing import Dict, List, Generator
 
@@ -100,6 +102,9 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
     # rglob 返回的是迭代器，不要用 list() 包裹它
     total_bytes = 0
     count = 0
+    start_time = time.time()
+    last_log_time = start_time
+    process = psutil.Process(os.getpid())
     for img_path in fake_dir.rglob("*"):
         if img_path.is_file() and img_path.suffix.lower() in image_extensions:
             rel_path = img_path.relative_to(data_root)
@@ -110,11 +115,20 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
                 else:
                     img_bytes = resize_to_jpeg(img_path)
                 
-                # DEBUG: Track cumulative size
+                # DEBUG: Track cumulative size and performance
                 total_bytes += len(img_bytes)
                 count += 1
                 if count % 1000 == 0:
-                    print(f"[DEBUG] Processed {count} images, cumulative size: {total_bytes / (1024**3):.2f} GB, avg size: {total_bytes / count / (1024**2):.2f} MB")
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    interval = current_time - last_log_time
+                    mem_info = process.memory_info()
+                    
+                    print(f"[DEBUG] Processed {count} images:")
+                    print(f"  - Cumulative size: {total_bytes / (1024**3):.2f} GB, avg: {total_bytes / count / (1024**2):.2f} MB")
+                    print(f"  - Speed: {1000/interval:.1f} img/s (last 1000), {count/elapsed:.1f} img/s (overall)")
+                    print(f"  - Memory: RSS={mem_info.rss / (1024**3):.2f} GB, VMS={mem_info.vms / (1024**3):.2f} GB")
+                    last_log_time = current_time
                 
                 yield {
                     "image": {"bytes": img_bytes},  # 直接提供字节数据
@@ -138,11 +152,20 @@ def image_generator(data_root: Path, image_extensions: set, no_resize: bool = Fa
                 else:
                     img_bytes = resize_to_jpeg(img_path)
                 
-                # DEBUG: Track cumulative size
+                # DEBUG: Track cumulative size and performance
                 total_bytes += len(img_bytes)
                 count += 1
                 if count % 1000 == 0:
-                    print(f"[DEBUG] Processed {count} images, cumulative size: {total_bytes / (1024**3):.2f} GB, avg size: {total_bytes / count / (1024**2):.2f} MB")
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    interval = current_time - last_log_time
+                    mem_info = process.memory_info()
+                    
+                    print(f"[DEBUG] Processed {count} images:")
+                    print(f"  - Cumulative size: {total_bytes / (1024**3):.2f} GB, avg: {total_bytes / count / (1024**2):.2f} MB")
+                    print(f"  - Speed: {1000/interval:.1f} img/s (last 1000), {count/elapsed:.1f} img/s (overall)")
+                    print(f"  - Memory: RSS={mem_info.rss / (1024**3):.2f} GB, VMS={mem_info.vms / (1024**3):.2f} GB")
+                    last_log_time = current_time
                 
                 yield {
                     "image": {"bytes": img_bytes},  # 直接提供字节数据
@@ -173,6 +196,19 @@ def main() -> None:
 
     # 2. 使用 from_generator 构建 Dataset
     # 这样 HuggingFace 会流式地读取图片并写入磁盘，不会撑爆内存
+    # Calculate optimal writer batch size based on expected image size
+    # Target: keep batch size under 1.5GB to safely avoid 2GB PyArrow limit
+    # For original images (~2.74MB avg), use smaller batch size
+    if args.no_resize:
+        # Conservative batch size for large original images
+        # Assuming 3MB avg per image: 1.5GB / 3MB = ~500 images
+        writer_batch_size = 500
+        print(f"[DEBUG] Using writer_batch_size={writer_batch_size} for original format images")
+    else:
+        # Resized images are smaller (~100-200KB), can use larger batches
+        writer_batch_size = 1000
+        print(f"[DEBUG] Using writer_batch_size={writer_batch_size} for resized images")
+    
     hf_dataset = Dataset.from_generator(
         generator=image_generator,
         gen_kwargs={
@@ -181,6 +217,7 @@ def main() -> None:
             "no_resize": args.no_resize,
         },
         features=features,
+        writer_batch_size=writer_batch_size,
     )
 
     hf_ds = DatasetDict({"all": hf_dataset})
@@ -188,7 +225,17 @@ def main() -> None:
     # 3. 保存 Dataset 到磁盘
     # num_proc 可以开启多进程加速图片编码，但要注意内存占用会随进程数增加
     print("Saving dataset to disk (this involves reading and compressing images)...")
+    save_start = time.time()
+    
+    # [DIAGNOSTIC] Monitor memory during save
+    parent_process = psutil.Process(os.getpid())
+    print(f"[DEBUG] Pre-save memory: RSS={parent_process.memory_info().rss / (1024**3):.2f} GB")
+    
     hf_ds.save_to_disk(str(output_path), num_proc=4)
+    
+    save_elapsed = time.time() - save_start
+    print(f"[DEBUG] Save completed in {save_elapsed:.1f}s")
+    print(f"[DEBUG] Post-save memory: RSS={parent_process.memory_info().rss / (1024**3):.2f} GB")
 
     # 4. 创建索引 (Path Index)
     # 由于我们之前是用 generator 流式写入的，现在需要重新遍历一下生成的 dataset 来建立索引
@@ -200,13 +247,24 @@ def main() -> None:
     saved_ds = hf_ds["all"]
 
     # 我们只需要 'image_path' 列，不需要加载图片数据，所以速度很快
+    print("[DEBUG] Creating path index...")
+    index_start = time.time()
+    
+    # [DIAGNOSTIC] Monitor memory during index creation
+    mem_before = parent_process.memory_info().rss / (1024**3)
     path_list = saved_ds["image_path"]
+    mem_after_load = parent_process.memory_info().rss / (1024**3)
+    print(f"[DEBUG] Loaded {len(path_list)} paths, memory increased by {mem_after_load - mem_before:.2f} GB")
+    
     path_to_idx = {path: idx for idx, path in enumerate(path_list)}
 
     index_file = output_path / "path_index.json"
     print(f"Saving path index ({len(path_to_idx)} items) to {index_file}...")
     with open(index_file, "w", encoding="utf-8") as f:
         json.dump(path_to_idx, f, ensure_ascii=False, indent=2)
+    
+    index_elapsed = time.time() - index_start
+    print(f"[DEBUG] Index creation completed in {index_elapsed:.1f}s")
 
     print("Done!")
 
