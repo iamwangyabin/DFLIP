@@ -31,7 +31,6 @@ def resize_to_jpeg(img_path: Path) -> bytes:
     将图片resize为最短边512，并转换为JPEG格式（使用随机压缩质量和插值算法）。
     返回字节数据。
     """
-    print(f"[DEBUG] Actually processing image: {img_path.name}")
     # 随机选择插值算法
     interpolation_methods = [
         PILImage.NEAREST,    # 最近邻
