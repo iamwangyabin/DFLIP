@@ -62,7 +62,7 @@ data:
   val_split_seed: 42  # Seed for reproducible train/val split
   
   # Data augmentation
-  image_size: 448
+  image_size: 518
   augmentation:
     horizontal_flip: true
     rotation_range: 15
