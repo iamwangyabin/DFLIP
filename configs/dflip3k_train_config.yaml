@@ -55,6 +55,12 @@ data:
   use_hf_dataset: false
   hf_dataset_path: null
   
+  # Auto-split validation from training set
+  # If val_split_ratio > 0, validation set will be automatically split from train set
+  # Set to 0 to use manually specified 'val' split in metadata
+  val_split_ratio: 0.1  # Use 10% of training data for validation
+  val_split_seed: 42  # Seed for reproducible train/val split
+  
   # Data augmentation
   image_size: 448
   augmentation:

@@ -37,6 +37,12 @@ def parse_args():
     )
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode")
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="Max training steps per epoch (mainly for debug)",
+    )
     return parser.parse_args()
 
 
@@ -112,7 +118,7 @@ def main():
             epoch,
             config,
             args.debug,
-            args.steps,
+            args.max_steps,
             logger=logger,
         )
         print(f"\nTrain metrics: {train_metrics}")
