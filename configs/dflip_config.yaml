@@ -27,9 +27,15 @@ bhep:
   lambda_kl: 0.5
 
 data:
-  # Dataset paths
+  # Dataset paths (original JSON + image folder)
   metadata_path: "./assets/dflip3k_meta.json"
   image_root: "./data/images"
+
+  # Optional: HuggingFace Datasets backend
+  # When enabled, dataloaders will ignore JSON/image_root and instead read
+  # from a HF DatasetDict saved via tools/pack_dflip3k_to_hfds.py.
+  use_hf_dataset: false
+  hf_dataset_path: null  # e.g. "/home/data/yabin/datasets/dflip3k_hfds"
   
   # Data augmentation
   image_size: 448
