@@ -49,7 +49,7 @@ bhep:
 data:
   # Dataset paths
   metadata_path: "./assets/dflip3k_meta.json"
-  image_root: "/home/data/yabin/DFLIP3K"
+  image_root: "/media/DATASET/person_data/dflip3k"
 
   # HuggingFace Datasets backend (optional, recommended for large datasets)
   use_hf_dataset: false
