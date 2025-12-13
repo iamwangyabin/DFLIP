@@ -322,3 +322,263 @@ def save_checkpoint(
         torch.save(trainer_state, output_dir / "best_trainer_state.pt")
 
     print(f"Saved checkpoint to {output_dir}")
+
+
+# ============================================================================
+# Baseline Classifier Training Functions
+# ============================================================================
+
+def train_epoch_baseline(
+    model: nn.Module,
+    dataloader: DataLoader,
+    optimizer,
+    scheduler,
+    criterions: Dict[str, nn.Module],
+    epoch: int,
+    config: Dict,
+    loss_weights: Dict[str, float],
+    debug: bool = False,
+    max_steps: int | None = None,
+    logger: BaseLogger | None = None,
+):
+    """Train baseline classifier for a single epoch."""
+    
+    model.train()
+    train_config = config["training"]
+    grad_accum = train_config["gradient_accumulation_steps"]
+    
+    total_loss = 0.0
+    total_det_loss = 0.0
+    total_fam_loss = 0.0
+    total_ver_loss = 0.0
+    
+    det_correct = 0
+    fam_correct = 0
+    ver_correct = 0
+    total_samples = 0
+    fake_samples = 0
+    
+    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    
+    optimizer.zero_grad()
+    for step, batch in enumerate(progress_bar):
+        if max_steps is not None and step >= max_steps:
+            break
+        
+        pixel_values = batch["pixel_values"].to(model.device)
+        is_fake = batch["is_fake"].to(model.device)
+        family_ids = batch["family_ids"].to(model.device)
+        version_ids = batch["version_ids"].to(model.device)
+        
+        # Forward pass
+        outputs = model(pixel_values)
+        
+        # Compute losses for three heads
+        det_loss = criterions['detection'](outputs['detection_logits'], is_fake)
+        
+        # Only compute family/version loss for fake samples
+        fake_mask = is_fake == 1
+        if fake_mask.sum() > 0:
+            fam_loss = criterions['family'](
+                outputs['family_logits'][fake_mask],
+                family_ids[fake_mask]
+            )
+            ver_loss = criterions['version'](
+                outputs['version_logits'][fake_mask],
+                version_ids[fake_mask]
+            )
+        else:
+            fam_loss = torch.tensor(0.0, device=model.device)
+            ver_loss = torch.tensor(0.0, device=model.device)
+        
+        # Combined loss with weights
+        loss = (loss_weights['detection'] * det_loss +
+                loss_weights['family'] * fam_loss +
+                loss_weights['version'] * ver_loss)
+        
+        loss = loss / grad_accum
+        loss.backward()
+        
+        if (step + 1) % grad_accum == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+        
+        # Statistics
+        total_loss += (loss.item() * grad_accum)
+        total_det_loss += det_loss.item()
+        total_fam_loss += fam_loss.item() if isinstance(fam_loss, torch.Tensor) else fam_loss
+        total_ver_loss += ver_loss.item() if isinstance(ver_loss, torch.Tensor) else ver_loss
+        
+        # Accuracies
+        _, det_pred = outputs['detection_logits'].max(1)
+        det_correct += det_pred.eq(is_fake).sum().item()
+        
+        if fake_mask.sum() > 0:
+            _, fam_pred = outputs['family_logits'][fake_mask].max(1)
+            fam_correct += fam_pred.eq(family_ids[fake_mask]).sum().item()
+            
+            _, ver_pred = outputs['version_logits'][fake_mask].max(1)
+            ver_correct += ver_pred.eq(version_ids[fake_mask]).sum().item()
+            
+            fake_samples += fake_mask.sum().item()
+        
+        total_samples += is_fake.size(0)
+        
+        # Update progress bar
+        pbar_dict = {
+            'loss': f'{loss.item() * grad_accum:.4f}',
+            'det_acc': f'{100.*det_correct/total_samples:.1f}%',
+            'lr': f'{scheduler.get_last_lr()[0]:.2e}',
+        }
+        if fake_samples > 0:
+            pbar_dict['fam_acc'] = f'{100.*fam_correct/fake_samples:.1f}%'
+        progress_bar.set_postfix(pbar_dict)
+        
+        # Logging
+        if logger is not None and logger.is_active() and (step + 1) % train_config["logging_steps"] == 0:
+            log_dict = {
+                "train/loss": loss.item() * grad_accum,
+                "train/det_loss": det_loss.item(),
+                "train/fam_loss": total_fam_loss / (step + 1),
+                "train/ver_loss": total_ver_loss / (step + 1),
+                "train/det_acc": det_correct / total_samples,
+                "train/learning_rate": scheduler.get_last_lr()[0],
+                "epoch": epoch,
+                "step": step,
+            }
+            if fake_samples > 0:
+                log_dict["train/fam_acc"] = fam_correct / fake_samples
+                log_dict["train/ver_acc"] = ver_correct / fake_samples
+            logger.log(log_dict)
+    
+    num_steps = min(len(dataloader), max_steps) if max_steps is not None else len(dataloader)
+    num_steps = max(num_steps, 1)
+    
+    metrics = {
+        'loss': total_loss / num_steps,
+        'det_loss': total_det_loss / num_steps,
+        'fam_loss': total_fam_loss / num_steps,
+        'ver_loss': total_ver_loss / num_steps,
+        'det_acc': det_correct / total_samples if total_samples > 0 else 0.0,
+        'fam_acc': fam_correct / fake_samples if fake_samples > 0 else 0.0,
+        'ver_acc': ver_correct / fake_samples if fake_samples > 0 else 0.0,
+    }
+    
+    return metrics
+
+
+@torch.no_grad()
+def evaluate_baseline(
+    model: nn.Module,
+    dataloader: DataLoader,
+    criterions: Dict[str, nn.Module],
+    loss_weights: Dict[str, float],
+):
+    """Evaluate baseline classifier on validation set."""
+    
+    model.eval()
+    
+    total_loss = 0.0
+    total_det_loss = 0.0
+    total_fam_loss = 0.0
+    total_ver_loss = 0.0
+    
+    det_correct = 0
+    fam_correct = 0
+    ver_correct = 0
+    total_samples = 0
+    fake_samples = 0
+    
+    for batch in tqdm(dataloader, desc="Evaluating"):
+        pixel_values = batch["pixel_values"].to(model.device)
+        is_fake = batch["is_fake"].to(model.device)
+        family_ids = batch["family_ids"].to(model.device)
+        version_ids = batch["version_ids"].to(model.device)
+        
+        # Forward pass
+        outputs = model(pixel_values)
+        
+        # Compute losses
+        det_loss = criterions['detection'](outputs['detection_logits'], is_fake)
+        
+        fake_mask = is_fake == 1
+        if fake_mask.sum() > 0:
+            fam_loss = criterions['family'](
+                outputs['family_logits'][fake_mask],
+                family_ids[fake_mask]
+            )
+            ver_loss = criterions['version'](
+                outputs['version_logits'][fake_mask],
+                version_ids[fake_mask]
+            )
+        else:
+            fam_loss = torch.tensor(0.0, device=model.device)
+            ver_loss = torch.tensor(0.0, device=model.device)
+        
+        loss = (loss_weights['detection'] * det_loss +
+                loss_weights['family'] * fam_loss +
+                loss_weights['version'] * ver_loss)
+        
+        # Statistics
+        total_loss += loss.item()
+        total_det_loss += det_loss.item()
+        total_fam_loss += fam_loss.item() if isinstance(fam_loss, torch.Tensor) else fam_loss
+        total_ver_loss += ver_loss.item() if isinstance(ver_loss, torch.Tensor) else ver_loss
+        
+        # Accuracies
+        _, det_pred = outputs['detection_logits'].max(1)
+        det_correct += det_pred.eq(is_fake).sum().item()
+        
+        if fake_mask.sum() > 0:
+            fake_samples += fake_mask.sum().item()
+            _, fam_pred = outputs['family_logits'][fake_mask].max(1)
+            fam_correct += fam_pred.eq(family_ids[fake_mask]).sum().item()
+            
+            _, ver_pred = outputs['version_logits'][fake_mask].max(1)
+            ver_correct += ver_pred.eq(version_ids[fake_mask]).sum().item()
+        
+        total_samples += is_fake.size(0)
+    
+    num_batches = max(len(dataloader), 1)
+    
+    return {
+        'loss': total_loss / num_batches,
+        'det_loss': total_det_loss / num_batches,
+        'fam_loss': total_fam_loss / num_batches,
+        'ver_loss': total_ver_loss / num_batches,
+        'det_acc': det_correct / total_samples if total_samples > 0 else 0.0,
+        'fam_acc': fam_correct / fake_samples if fake_samples > 0 else 0.0,
+        'ver_acc': ver_correct / fake_samples if fake_samples > 0 else 0.0,
+    }
+
+
+def save_checkpoint_baseline(
+    model: nn.Module,
+    optimizer,
+    scheduler,
+    epoch: int,
+    config: Dict,
+    is_best: bool = False,
+):
+    """Save baseline model checkpoint."""
+    output_dir = Path(config["training"]["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+    }
+    
+    # Save epoch checkpoint
+    torch.save(checkpoint, output_dir / f"checkpoint_epoch_{epoch}.pt")
+    
+    # Save best model if applicable
+    if is_best:
+        torch.save(checkpoint, output_dir / "best_model.pt")
+        print(f"Saved best model to {output_dir / 'best_model.pt'}")
+    
+    print(f"Saved checkpoint to {output_dir}")
