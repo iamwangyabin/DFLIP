@@ -1,5 +1,5 @@
 model:
-  base_model: "vit_small_patch14_dinov2"
+  base_model: "vit_base_patch14_dinov2"
   cache_dir: "./models_cache"
   freeze_encoder: false
   use_lora: false
@@ -34,7 +34,7 @@ data:
   pin_memory: true
 
 training:
-  batch_size: 24
+  batch_size: 16
   gradient_accumulation_steps: 2
   num_epochs: 20
 
@@ -59,7 +59,7 @@ training:
 
   save_strategy: "epoch"
   save_total_limit: 3
-  output_dir: "./checkpoints/baseline_3heads"
+  output_dir: "./checkpoints/baseline_3heads_base"
 
   logging_steps: 50
   eval_strategy: "epoch"
@@ -70,7 +70,7 @@ logging:
   
   # SwanLab configuration
   swanlab_project: "dflip3k-baseline"
-  swanlab_experiment_name: 'baseline-3heads'
+  swanlab_experiment_name: 'baseline-3heads-base'
   
   # Legacy WandB support (disabled)
   use_wandb: false
