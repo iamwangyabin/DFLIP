@@ -69,12 +69,12 @@ logging:
   backend: "swanlab"
   
   # SwanLab configuration
-  swanlab_project: "dflip3k-baseline"
-  swanlab_experiment_name: 'baseline-3heads'
+  swanlab_project: "dflip3k"
+  swanlab_experiment_name: 'baseline-dino2small-3heads'
   
   # Legacy WandB support (disabled)
   use_wandb: false
-  wandb_project: "dflip3k-baseline"
+  wandb_project: "dflip3k"
   wandb_entity: null
   
   log_level: "INFO"

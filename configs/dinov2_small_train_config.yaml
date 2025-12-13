@@ -108,12 +108,12 @@ logging:
   backend: "swanlab"
   
   # SwanLab 配置
-  swanlab_project: "dflip3k-profiling"
+  swanlab_project: "dflip3k"
   swanlab_experiment_name: 'dino-small'  # 留空将自动生成实验名称
   
   # 兼容旧配置（已禁用 WandB）
   use_wandb: false
-  wandb_project: "dflip3k-profiling"
+  wandb_project: "dflip3k"
   wandb_entity: null
   
   log_level: "INFO"
