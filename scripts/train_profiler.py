@@ -75,6 +75,7 @@ def main():
     loss_fn = BHEPLoss(
         lambda_edl=config["bhep"].get("lambda_edl", 0.1),
         lambda_kl=config["bhep"].get("lambda_kl", 0.5),
+        lambda_aux=config["bhep"].get("lambda_aux", 0.1),  # Auxiliary loss weight
     )
 
     train_config = config["training"]

@@ -45,6 +45,7 @@ bhep:
     - [1385]  # family 26: z-image (1 version)
   lambda_edl: 0.1
   lambda_kl: 0.5
+  lambda_aux: 0.1  # Auxiliary CE loss weight for raw evidence (prevents gradient collapse)
 
 data:
   # Dataset paths

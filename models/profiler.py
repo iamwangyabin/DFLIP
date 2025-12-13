@@ -122,6 +122,7 @@ class BayesianEvidenceClassifier(nn.Module):
             "weights": norm_weights,
             "uncertainties": uncertainties,
             "diagnostics": diagnostics,
+            "evidence_ver_raw": evidence_ver_raw,  # For auxiliary loss
         }
 
 
@@ -197,10 +198,11 @@ class DFLIPProfiler(nn.Module):
 
 
 class BHEPLoss(nn.Module):
-    def __init__(self, lambda_edl=0.1, lambda_kl=0.5):
+    def __init__(self, lambda_edl=0.1, lambda_kl=0.5, lambda_aux=0.1):
         super().__init__()
         self.lambda_edl = lambda_edl
         self.lambda_kl = lambda_kl
+        self.lambda_aux = lambda_aux  # Weight for auxiliary CE loss
         self.bce = nn.BCEWithLogitsLoss()
 
     def edl_loss(self, alpha, y):
@@ -250,6 +252,14 @@ class BHEPLoss(nn.Module):
             alpha_ver = outputs['alpha_ver'][is_fake]
             target_ver = targets['label_ver'][is_fake]
             loss_ver += self.edl_loss(alpha_ver, target_ver)
+            
+            # Auxiliary CE loss on raw evidence (before gating) to prevent gradient collapse
+            if 'evidence_ver_raw' in outputs:
+                evidence_ver_raw = outputs['evidence_ver_raw'][is_fake]
+                # Convert evidence to logits (log of concentration parameters)
+                raw_logits = torch.log(evidence_ver_raw + 1.0)
+                loss_aux = F.cross_entropy(raw_logits, target_ver)
+                loss_ver += self.lambda_aux * loss_aux
 
         if is_real.sum() > 0:
             alpha_fam_real = outputs['alpha_fam'][is_real]
@@ -264,7 +274,7 @@ class BHEPLoss(nn.Module):
             "loss": total_loss,
             "detection_loss": loss_det.item(),
             "bhep_fam_loss": loss_fam.item() if isinstance(loss_fam, torch.Tensor) else loss_fam,
-            "bhep_ver_loss": loss_ver.item() if isinstance(loss_ver, torch.Tensor) else loss_ver
+            "bhep_ver_loss": loss_ver.item() if isinstance(loss_ver, torch.Tensor) else loss_ver,
         }
 
 
