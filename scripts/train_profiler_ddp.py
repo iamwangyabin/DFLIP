@@ -6,9 +6,6 @@
     torchrun --nproc_per_node=4 scripts/train_profiler_ddp.py \
         --config configs/dflip_config.yaml
 
-注意：
-- config["training"]["batch_size"] 表示 **每张卡上的 batch_size**。
-  总有效 batch_size = per_gpu_batch_size * world_size。
 """
 
 import argparse

@@ -82,6 +82,12 @@ def train_epoch(
     total_det_loss = 0.0
     total_bhep_fam_loss = 0.0
     total_bhep_ver_loss = 0.0
+    
+    # Diagnostic accumulators for version analysis
+    total_gate_mean = 0.0
+    total_evidence_ver_ratio = 0.0
+    total_alpha_ver_mean = 0.0
+    diag_count = 0
 
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
 
@@ -118,6 +124,14 @@ def train_epoch(
             total_bhep_fam_loss += loss_dict["bhep_fam_loss"]
         if "bhep_ver_loss" in loss_dict:
             total_bhep_ver_loss += loss_dict["bhep_ver_loss"]
+        
+        # Collect diagnostic statistics
+        if "diagnostics" in outputs:
+            diag = outputs["diagnostics"]
+            total_gate_mean += diag["gate_mean"]
+            total_evidence_ver_ratio += diag["evidence_ver_ratio"]
+            total_alpha_ver_mean += diag["alpha_ver_mean"]
+            diag_count += 1
 
         pbar_dict = {
             "loss": f"{loss_dict['loss'].item():.4f}",
@@ -142,6 +156,22 @@ def train_epoch(
                 log_dict["train/bhep_fam_loss"] = loss_dict["bhep_fam_loss"]
             if "bhep_ver_loss" in loss_dict:
                 log_dict["train/bhep_ver_loss"] = loss_dict["bhep_ver_loss"]
+            
+            # Add diagnostic information to logs
+            if "diagnostics" in outputs:
+                diag = outputs["diagnostics"]
+                log_dict.update({
+                    "diagnostics/gate_mean": diag["gate_mean"],
+                    "diagnostics/gate_std": diag["gate_std"],
+                    "diagnostics/evidence_ver_raw_mean": diag["evidence_ver_raw_mean"],
+                    "diagnostics/evidence_ver_mean": diag["evidence_ver_mean"],
+                    "diagnostics/evidence_ver_ratio": diag["evidence_ver_ratio"],
+                    "diagnostics/alpha_ver_mean": diag["alpha_ver_mean"],
+                    "diagnostics/alpha_ver_std": diag["alpha_ver_std"],
+                    "diagnostics/alpha_ver_max": diag["alpha_ver_max"],
+                    "diagnostics/S_ver_mean": diag["S_ver_mean"],
+                })
+            
             logger.log(log_dict)
 
     num_steps = min(len(dataloader), max_steps) if max_steps is not None else len(dataloader)
@@ -154,6 +184,18 @@ def train_epoch(
         metrics["bhep_fam_loss"] = total_bhep_fam_loss / num_steps
     if total_bhep_ver_loss > 0:
         metrics["bhep_ver_loss"] = total_bhep_ver_loss / num_steps
+    
+    # Add diagnostic summary to metrics
+    if diag_count > 0:
+        metrics.update({
+            "diag_gate_mean": total_gate_mean / diag_count,
+            "diag_evidence_ver_ratio": total_evidence_ver_ratio / diag_count,
+            "diag_alpha_ver_mean": total_alpha_ver_mean / diag_count,
+        })
+        print(f"\n[DIAGNOSTICS] Gate mean: {metrics['diag_gate_mean']:.4f}, "
+              f"Evidence ratio: {metrics['diag_evidence_ver_ratio']:.4f}, "
+              f"Alpha_ver mean: {metrics['diag_alpha_ver_mean']:.4f}")
+    
     return metrics
 
 

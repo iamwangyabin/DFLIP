@@ -103,9 +103,18 @@ training:
   eval_strategy: "epoch"
 
 logging:
-  use_wandb: true
+  # 使用 SwanLab 作为日志后端
+  backend: "swanlab"
+  
+  # SwanLab 配置
+  swanlab_project: "dflip3k-profiling"
+  swanlab_experiment_name: null  # 留空将自动生成实验名称
+  
+  # 兼容旧配置（已禁用 WandB）
+  use_wandb: false
   wandb_project: "dflip3k-profiling"
   wandb_entity: null
+  
   log_level: "INFO"
 
 hardware:

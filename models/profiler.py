@@ -97,6 +97,19 @@ class BayesianEvidenceClassifier(nn.Module):
         family_logits = torch.log(b_fam + 1e-9)   # (B, num_families)
         version_logits = torch.log(b_ver + 1e-9)  # (B, num_versions)
 
+        # Diagnostic statistics for debugging version loss issue
+        diagnostics = {
+            "gate_mean": gate.mean().item(),
+            "gate_std": gate.std().item(),
+            "evidence_ver_raw_mean": evidence_ver_raw.mean().item(),
+            "evidence_ver_mean": evidence_ver.mean().item(),
+            "evidence_ver_ratio": (evidence_ver.mean() / (evidence_ver_raw.mean() + 1e-9)).item(),
+            "alpha_ver_mean": alpha_ver.mean().item(),
+            "alpha_ver_std": alpha_ver.std().item(),
+            "alpha_ver_max": alpha_ver.max().item(),
+            "S_ver_mean": S_ver.mean().item(),
+        }
+
         return {
             "detection_logits": torch.cat([-final_logit, final_logit], dim=1), # For compatibility (B, 2)
             "final_logit": final_logit,   # (B, 1)
@@ -108,6 +121,7 @@ class BayesianEvidenceClassifier(nn.Module):
             "b_ver": b_ver,
             "weights": norm_weights,
             "uncertainties": uncertainties,
+            "diagnostics": diagnostics,
         }
 
 
