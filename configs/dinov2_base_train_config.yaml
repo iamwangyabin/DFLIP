@@ -108,7 +108,7 @@ logging:
   
   # SwanLab 配置
   swanlab_project: "dflip3k-profiling"
-  swanlab_experiment_name: null  # 留空将自动生成实验名称
+  swanlab_experiment_name: 'dino-base'
   
   # 兼容旧配置（已禁用 WandB）
   use_wandb: false
