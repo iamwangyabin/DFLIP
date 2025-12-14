@@ -118,27 +118,102 @@ def is_valid_prompt(prompt: str, min_length: int, max_length: int) -> bool:
 
 
 def extract_prompt_from_record(record: Dict[str, Any]) -> Optional[str]:
-    """Extract prompt from a record, handling different possible locations."""
-    # Try meta.prompt first (most common)
+    """Extract prompt from a record using comprehensive 3-tier strategy."""
+    
+    # Tier 1: Standard WebUI format - check root level prompt
+    if record.get('prompt'):
+        return str(record['prompt'])
+    
+    # Tier 2: Civitai metadata format - check meta.prompt
     if record.get('meta') and isinstance(record['meta'], dict):
         prompt = record['meta'].get('prompt')
         if prompt:
             return str(prompt)
     
-    # Try other possible locations
-    prompt_fields = ['prompt', 'description', 'caption']
-    for field in prompt_fields:
+    # Tier 3: ComfyUI workflow format - parse comfy JSON and extract from nodes
+    if (record.get('meta') and isinstance(record['meta'], dict) and
+        record['meta'].get('comfy')):
+        
+        comfy_prompt = extract_comfyui_prompt(record['meta']['comfy'])
+        if comfy_prompt:
+            return comfy_prompt
+    
+    # Fallback: Try other possible locations
+    fallback_fields = ['description', 'caption']
+    for field in fallback_fields:
         if record.get(field):
             return str(record[field])
     
     return None
 
 
-def convert_record_to_llava(record: Dict[str, Any], question_template: str, 
+def extract_comfyui_prompt(comfy_data: str) -> Optional[str]:
+    """Extract prompt from ComfyUI workflow JSON string."""
+    try:
+        # Parse the ComfyUI JSON string
+        if isinstance(comfy_data, str):
+            comfy_json = json.loads(comfy_data)
+        else:
+            comfy_json = comfy_data
+        
+        # Look for prompt in the workflow structure
+        if isinstance(comfy_json, dict) and 'prompt' in comfy_json:
+            prompt_nodes = comfy_json['prompt']
+            
+            # Iterate through all nodes to find text inputs
+            for node_id, node_data in prompt_nodes.items():
+                if isinstance(node_data, dict) and 'inputs' in node_data:
+                    inputs = node_data['inputs']
+                    
+                    # Check for standard text input (CLIPTextEncode)
+                    if 'text' in inputs and inputs['text']:
+                        text = inputs['text']
+                        if isinstance(text, str) and len(text.strip()) > 0:
+                            return text.strip()
+                    
+                    # Check for positive text input (MilehighStyler)
+                    if 'text_positive' in inputs and inputs['text_positive']:
+                        text = inputs['text_positive']
+                        if isinstance(text, str) and len(text.strip()) > 0:
+                            return text.strip()
+                    
+                    # Check for text2 input (ShowText|pysssss)
+                    if 'text2' in inputs and inputs['text2']:
+                        text = inputs['text2']
+                        if isinstance(text, str) and len(text.strip()) > 0:
+                            return text.strip()
+        
+        return None
+        
+    except (json.JSONDecodeError, TypeError, KeyError, AttributeError) as e:
+        # If JSON parsing fails or structure is unexpected, return None
+        return None
+
+
+def convert_record_to_llava(record: Dict[str, Any], question_template: str,
                            image_ext: str, min_length: int, max_length: int) -> Optional[Dict[str, Any]]:
     """Convert a single record to LLaVA format."""
-    # Extract ID
-    record_id = record.get('id')
+    # Extract ID from _meta_filename or _meta_json_path
+    record_id = None
+    
+    # First try to get ID from _meta_filename
+    if record.get('_meta_filename'):
+        filename = record['_meta_filename']
+        if filename.endswith('.json'):
+            record_id = filename[:-5]  # Remove .json extension
+    
+    # If not found, try to extract from _meta_json_path
+    if not record_id and record.get('_meta_json_path'):
+        json_path = record['_meta_json_path']
+        # Extract filename from path and remove .json extension
+        filename = Path(json_path).name
+        if filename.endswith('.json'):
+            record_id = filename[:-5]  # Remove .json extension
+    
+    # Fallback to original 'id' field if neither meta field is available
+    if not record_id:
+        record_id = record.get('id')
+    
     if not record_id:
         return None
     
