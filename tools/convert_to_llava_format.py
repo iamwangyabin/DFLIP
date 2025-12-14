@@ -21,12 +21,17 @@ Features:
 
 import argparse
 import json
+import random
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
 from collections import defaultdict
 
+# Question templates for random selection
+QUESTION_TEMPLATES = [
+    "<image>\nPlease write an prompt for this image. The prompt will be used by image generation models to try and recreate the image as exactly as possible. So make sure the prompt is complete, accurate, and detailed.",
+]
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -49,12 +54,6 @@ def parse_args():
         type=str,
         default=".jpg",
         help="Image file extension (default: .jpg)"
-    )
-    parser.add_argument(
-        "--question-template",
-        type=str,
-        default="<image>\nDescribe this image in detail.",
-        help="Question template for human input"
     )
     parser.add_argument(
         "--min-prompt-length",
@@ -241,8 +240,8 @@ def build_image_mapping(image_dir: str) -> Dict[str, str]:
     return image_mapping
 
 
-def convert_record_to_llava(record: Dict[str, Any], question_template: str,
-                           image_ext: str, min_length: int, max_length: int,
+def convert_record_to_llava(record: Dict[str, Any], image_ext: str,
+                           min_length: int, max_length: int,
                            image_mapping: Dict[str, str]) -> Optional[Dict[str, Any]]:
     """Convert a single record to LLaVA format, only if corresponding image exists."""
     # Extract ID from _meta_filename or _meta_json_path
@@ -285,6 +284,9 @@ def convert_record_to_llava(record: Dict[str, Any], question_template: str,
     
     # Use actual image path from mapping
     image_path = image_mapping[record_id]
+    
+    # Randomly select a question template
+    question_template = random.choice(QUESTION_TEMPLATES)
     
     # Create LLaVA format record
     llava_record = {
@@ -472,7 +474,6 @@ def main():
     for record in pbar:
         llava_record = convert_record_to_llava(
             record,
-            args.question_template,
             args.image_ext,
             args.min_prompt_length,
             args.max_prompt_length,
@@ -521,7 +522,7 @@ def main():
     print(f"   - Use this file directly with LLaVA training frameworks")
     print(f"   - Images paths are relative to: {args.image_dir}")
     print(f"   - Only records with existing images are included")
-    print(f"   - Question template: '{args.question_template}'")
+    print(f"   - Question templates: {len(QUESTION_TEMPLATES)} random templates used")
     print(f"   - Prompt length range: {args.min_prompt_length}-{args.max_prompt_length} chars")
 
 
