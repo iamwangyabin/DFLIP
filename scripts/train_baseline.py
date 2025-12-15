@@ -208,7 +208,7 @@ def main():
             model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=True  # Enable to identify unused parameters
+            find_unused_parameters=False  # All parameters are used - no need for extra traversal
         )
     
     if is_main_process:
