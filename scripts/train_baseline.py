@@ -165,17 +165,18 @@ def main():
         print("Creating datasets...")
     
     if use_ddp:
-        train_loader, val_loader, train_sampler, val_sampler = create_profiling_dataloaders_ddp(
+        train_loader, val_loader, test_loader, train_sampler, val_sampler, test_sampler = create_profiling_dataloaders_ddp(
             config, train_transform, val_transform, world_size=world_size, rank=rank
         )
     else:
         # Single GPU: use regular dataloaders
         from dataset import create_profiling_dataloaders
-        train_loader, val_loader = create_profiling_dataloaders(
+        train_loader, val_loader, test_loader = create_profiling_dataloaders(
             config, train_transform, val_transform
         )
         train_sampler = None
         val_sampler = None
+        test_sampler = None
     
     if is_main_process:
         print("Creating baseline classifier model...")
@@ -193,11 +194,21 @@ def main():
     
     # Wrap with DDP if using distributed training
     if use_ddp:
+        # Add parameter usage diagnostics
+        print(f"[DEBUG] Total model parameters: {sum(p.numel() for p in model.parameters())}")
+        print(f"[DEBUG] Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+        
+        # Print parameter names and shapes for debugging
+        print("[DEBUG] Model parameter structure:")
+        for i, (name, param) in enumerate(model.named_parameters()):
+            if param.requires_grad:
+                print(f"  [{i:2d}] {name}: {param.shape} ({param.numel()} params)")
+        
         model = DDP(
             model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=False
+            find_unused_parameters=True  # Enable to identify unused parameters
         )
     
     if is_main_process:
@@ -344,11 +355,44 @@ def main():
                 False
             )
     
+    # Final test evaluation after training completion
+    if is_main_process and not args.debug:
+        print("\n" + "=" * 50)
+        print("Evaluating on test set...")
+        print("=" * 50)
+        
+        test_metrics = evaluate_baseline(
+            model,
+            test_loader,
+            criterions,
+            loss_weights,
+        )
+        print(f"Test metrics: {test_metrics}")
+        
+        # Log test results
+        if logger is not None and logger.is_active():
+            logger.log(
+                {
+                    "test/loss": test_metrics["loss"],
+                    "test/det_loss": test_metrics["det_loss"],
+                    "test/fam_loss": test_metrics["fam_loss"],
+                    "test/ver_loss": test_metrics["ver_loss"],
+                    "test/det_acc": test_metrics["det_acc"],
+                    "test/fam_acc": test_metrics["fam_acc"],
+                    "test/ver_acc": test_metrics["ver_acc"],
+                }
+            )
+    
     if is_main_process:
         print("\n" + "=" * 50)
         print("Training completed!")
         print(f"Best validation accuracy: {best_val_acc:.4f}")
         print(f"Best validation loss: {best_val_loss:.4f}")
+        if not args.debug:
+            print(f"Final test accuracy - Det: {test_metrics['det_acc']:.4f}, "
+                  f"Fam: {test_metrics['fam_acc']:.4f}, Ver: {test_metrics['ver_acc']:.4f}")
+            avg_test_acc = (test_metrics["det_acc"] + test_metrics["fam_acc"] + test_metrics["ver_acc"]) / 3
+            print(f"Average test accuracy: {avg_test_acc:.4f}")
         print(f"Checkpoints saved to: {config['training']['output_dir']}")
         print("=" * 50)
         

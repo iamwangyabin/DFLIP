@@ -240,15 +240,28 @@ def split_train_val_indices(total_size: int, val_ratio: float, seed: int) -> Tup
     return train_indices, val_indices
 
 
-def create_profiling_dataloaders(config: Dict, train_transform, val_transform):
-    """Create train and val dataloaders for single-GPU training.
+def create_profiling_dataloaders(config: Dict, train_transform, val_transform, test_transform=None):
+    """Create train, val, and test dataloaders for single-GPU training.
 
     This will respect `config["data"]["use_hf_dataset"]` to choose between
     JSON+folder and HuggingFace Datasets backends.
     
     If `config["data"]["val_split_ratio"]` > 0, validation set will be automatically
     split from the training set. Otherwise, uses the 'val' split from metadata.
+    
+    Args:
+        config: Configuration dictionary
+        train_transform: Transform for training data
+        val_transform: Transform for validation data
+        test_transform: Transform for test data (defaults to val_transform if None)
+        
+    Returns:
+        Tuple of (train_loader, val_loader, test_loader)
     """
+    
+    # Use val_transform for test if not provided
+    if test_transform is None:
+        test_transform = val_transform
     
     data_cfg = config.get("data", {})
     val_split_ratio = data_cfg.get("val_split_ratio", 0.0)
@@ -342,6 +355,54 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform):
             drop_last=False,
         )
         
+        # For auto-split case, create test dataloader separately
+        if use_hf:
+            hf_root = data_cfg.get("hf_dataset_path")
+            ds_dict = load_from_disk(hf_root)
+            if "test" in ds_dict:
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+            else:
+                print("Warning: No test split found in HF dataset, using validation transform on train split subset")
+                # Fallback: use a small subset of train for testing
+                test_indices = train_indices[:min(1000, len(train_indices)//10)]
+                test_dataset = Subset(
+                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config),
+                    test_indices
+                )
+        else:
+            # Try to create test dataset from metadata
+            try:
+                test_dataset = ProfilingDataset(
+                    metadata_path=config["data"]["metadata_path"],
+                    image_root=config["data"]["image_root"],
+                    transform=test_transform,
+                    split="test",
+                    config=config,
+                )
+            except:
+                print("Warning: No test split found in metadata, using validation transform on train split subset")
+                # Fallback: use a small subset of train for testing
+                test_indices = train_indices[:min(1000, len(train_indices)//10)]
+                test_dataset = Subset(
+                    ProfilingDataset(
+                        metadata_path=config["data"]["metadata_path"],
+                        image_root=config["data"]["image_root"],
+                        transform=test_transform,
+                        split="train",
+                        config=config,
+                    ),
+                    test_indices
+                )
+        
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config["training"]["batch_size"],
+            shuffle=False,
+            num_workers=config["data"].get("num_workers", 4),
+            pin_memory=config["data"].get("pin_memory", True),
+            drop_last=False,
+        )
+        
     else:
         # Use manually specified 'val' split from metadata
         print("Using manually specified 'val' split from metadata")
@@ -369,26 +430,55 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform):
             num_workers=config["data"].get("num_workers", 4),
             pin_memory=config["data"].get("pin_memory", True),
         )
+        
+        # Create test dataloader
+        test_loader = create_dataloader(
+            metadata_path=config["data"]["metadata_path"],
+            image_root=config["data"]["image_root"],
+            transform=test_transform,
+            task_mode="profiling",
+            batch_size=config["training"]["batch_size"],
+            split="test",
+            config=config,
+            num_workers=config["data"].get("num_workers", 4),
+            pin_memory=config["data"].get("pin_memory", True),
+        )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def create_profiling_dataloaders_ddp(
     config: Dict,
     train_transform,
     val_transform,
+    test_transform=None,
     *,
     world_size: int,
     rank: int,
 ):
-    """Create train and val dataloaders with samplers for DDP training.
+    """Create train, val, and test dataloaders with samplers for DDP training.
 
     This will respect `config["data"]["use_hf_dataset"]` similarly to
     `create_profiling_dataloaders`.
     
     If `config["data"]["val_split_ratio"]` > 0, validation set will be automatically
     split from the training set. Otherwise, uses the 'val' split from metadata.
+    
+    Args:
+        config: Configuration dictionary
+        train_transform: Transform for training data
+        val_transform: Transform for validation data
+        test_transform: Transform for test data (defaults to val_transform if None)
+        world_size: Number of processes for DDP
+        rank: Current process rank
+        
+    Returns:
+        Tuple of (train_loader, val_loader, test_loader, train_sampler, val_sampler, test_sampler)
     """
+
+    # Use val_transform for test if not provided
+    if test_transform is None:
+        test_transform = val_transform
 
     data_cfg = config.get("data", {})
     use_hf = bool(data_cfg.get("use_hf_dataset", False))
@@ -464,6 +554,48 @@ def create_profiling_dataloaders_ddp(
                 ),
                 val_indices
             )
+        
+        # For auto-split case, create test dataloader separately
+        if use_hf:
+            hf_root = data_cfg.get("hf_dataset_path")
+            ds_dict = load_from_disk(hf_root)
+            if "test" in ds_dict:
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+            else:
+                if rank == 0:
+                    print("Warning: No test split found in HF dataset, using validation transform on train split subset")
+                # Fallback: use a small subset of train for testing
+                test_indices = train_indices[:min(1000, len(train_indices)//10)]
+                test_dataset = Subset(
+                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config),
+                    test_indices
+                )
+        else:
+            # Try to create test dataset from metadata
+            try:
+                test_dataset = ProfilingDataset(
+                    metadata_path=config["data"]["metadata_path"],
+                    image_root=config["data"]["image_root"],
+                    transform=test_transform,
+                    split="test",
+                    config=config,
+                )
+            except:
+                if rank == 0:
+                    print("Warning: No test split found in metadata, using validation transform on train split subset")
+                # Fallback: use a small subset of train for testing
+                test_indices = train_indices[:min(1000, len(train_indices)//10)]
+                test_dataset = Subset(
+                    ProfilingDataset(
+                        metadata_path=config["data"]["metadata_path"],
+                        image_root=config["data"]["image_root"],
+                        transform=test_transform,
+                        split="train",
+                        config=config,
+                    ),
+                    test_indices
+                )
+        
     else:
         # Use manually specified 'val' split from metadata
         if rank == 0:
@@ -480,6 +612,14 @@ def create_profiling_dataloaders_ddp(
 
             train_dataset = HFProfilingDataset(ds_dict["train"], transform=train_transform, config=config)
             val_dataset = HFProfilingDataset(ds_dict["val"], transform=val_transform, config=config)
+            
+            # Create test dataset
+            if "test" in ds_dict:
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+            else:
+                if rank == 0:
+                    print("Warning: No test split found in HF dataset, using val dataset for testing")
+                test_dataset = HFProfilingDataset(ds_dict["val"], transform=test_transform, config=config)
         else:
             train_dataset = ProfilingDataset(
                 metadata_path=config["data"]["metadata_path"],
@@ -495,6 +635,26 @@ def create_profiling_dataloaders_ddp(
                 split="val",
                 config=config,
             )
+            
+            # Create test dataset
+            try:
+                test_dataset = ProfilingDataset(
+                    metadata_path=config["data"]["metadata_path"],
+                    image_root=config["data"]["image_root"],
+                    transform=test_transform,
+                    split="test",
+                    config=config,
+                )
+            except:
+                if rank == 0:
+                    print("Warning: No test split found in metadata, using val dataset for testing")
+                test_dataset = ProfilingDataset(
+                    metadata_path=config["data"]["metadata_path"],
+                    image_root=config["data"]["image_root"],
+                    transform=test_transform,
+                    split="val",
+                    config=config,
+                )
 
     # Create DistributedSamplers
     train_sampler = DistributedSampler(
@@ -506,6 +666,13 @@ def create_profiling_dataloaders_ddp(
     )
     val_sampler = DistributedSampler(
         val_dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=False,
+        drop_last=False,
+    )
+    test_sampler = DistributedSampler(
+        test_dataset,
         num_replicas=world_size,
         rank=rank,
         shuffle=False,
@@ -530,8 +697,16 @@ def create_profiling_dataloaders_ddp(
         num_workers=config["data"].get("num_workers", 4),
         pin_memory=config["data"].get("pin_memory", True),
     )
+    
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=per_device_batch_size,
+        sampler=test_sampler,
+        num_workers=config["data"].get("num_workers", 4),
+        pin_memory=config["data"].get("pin_memory", True),
+    )
 
-    return train_loader, val_loader, train_sampler, val_sampler
+    return train_loader, val_loader, test_loader, train_sampler, val_sampler, test_sampler
 
 
 __all__ = [
