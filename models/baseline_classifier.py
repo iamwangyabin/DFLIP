@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
+import timm
 from typing import Dict
-from .vision_encoder import TimmMultiLevelEncoder
 
 
 class BaselineClassifier(nn.Module):
     """
-    Baseline classifier with three independent classification heads.
-    Similar to profiler.py structure but without evidential learning.
+    Simple baseline classifier with three independent classification heads.
+    Uses timm in the most traditional way - just the final pooled features.
     One backbone with three MLP heads: detection, family, version.
     """
     def __init__(
@@ -21,13 +21,19 @@ class BaselineClassifier(nn.Module):
     ):
         super().__init__()
         
-        # Shared backbone encoder
-        self.vision_encoder = TimmMultiLevelEncoder(
-            model_name=model_name,
-            freeze=freeze_encoder,
-            pretrained=True
+        # Simple timm backbone - traditional baseline approach
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=True,
+            num_classes=0,  # Remove classifier head, get features only
         )
-        self.vision_hidden_size = self.vision_encoder.fused_dim
+        
+        # Get feature dimension from the model
+        self.vision_hidden_size = self.backbone.num_features
+        
+        if freeze_encoder:
+            self.backbone.requires_grad_(False)
+            self.backbone.eval()
         
         # Detection head (real/fake binary classification)
         self.detection_head = nn.Sequential(
@@ -84,8 +90,8 @@ class BaselineClassifier(nn.Module):
                 - family_logits: (B, num_families) family classification logits
                 - version_logits: (B, num_versions) version classification logits
         """
-        # Extract shared features from backbone
-        features = self.vision_encoder(pixel_values)  # (B, fused_dim)
+        # Extract features using simple timm approach
+        features = self.backbone(pixel_values)  # (B, num_features)
         
         # Pass through three independent heads
         detection_logits = self.detection_head(features)  # (B, 2)
