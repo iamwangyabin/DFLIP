@@ -293,22 +293,19 @@ def main():
         if is_main_process:
             print(f"\nTrain metrics: {train_metrics}")
         
-        # Synchronize all processes before evaluation
-        if use_ddp:
-            dist.barrier()
-        
-        # Validation and test evaluation (all processes participate)
+        # Validation and test evaluation (all processes participate to avoid NCCL timeout)
         if not args.debug:
             # Unwrap DDP model for evaluation to avoid synchronization issues
             eval_model = model.module if use_ddp else model
             
-            # All processes participate in evaluation with metrics aggregation
+            # All processes run evaluation (each on their data shard via DistributedSampler)
+            # This prevents NCCL timeout by keeping all processes busy
             val_metrics = evaluate_baseline(
                 eval_model,
                 val_loader,
                 criterions,
                 loss_weights,
-                use_ddp=use_ddp,
+                use_ddp=use_ddp,  # Enable aggregation to get complete metrics
             )
             
             # Test evaluation (for observation only)
@@ -317,7 +314,7 @@ def main():
                 test_loader,
                 criterions,
                 loss_weights,
-                use_ddp=use_ddp,
+                use_ddp=use_ddp,  # Enable aggregation to get complete metrics
             )
             
             # Only main process handles logging and checkpoint saving
@@ -366,10 +363,6 @@ def main():
                     config,
                     is_best
                 )
-        
-        # Synchronize all processes after evaluation and checkpointing
-        if use_ddp:
-            dist.barrier()
             
         elif args.debug and is_main_process:
             # Debug mode: save checkpoint each epoch

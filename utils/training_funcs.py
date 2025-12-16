@@ -493,6 +493,11 @@ def evaluate_baseline(
     # Get device from model
     device = next(model.parameters()).device
     
+    # Check if we should show progress bar (only main process in DDP)
+    show_progress = True
+    if use_ddp and dist.is_initialized():
+        show_progress = dist.get_rank() == 0
+    
     total_loss = 0.0
     total_det_loss = 0.0
     total_fam_loss = 0.0
@@ -504,7 +509,9 @@ def evaluate_baseline(
     total_samples = 0
     fake_samples = 0
     
-    for batch in tqdm(dataloader, desc="Evaluating"):
+    # Only show tqdm on main process to avoid multiple progress bars
+    iterator = tqdm(dataloader, desc="Evaluating") if show_progress else dataloader
+    for batch in iterator:
         pixel_values = batch["pixel_values"].to(device)
         is_fake = batch["is_fake"].to(device)
         family_ids = batch["family_ids"].to(device)
