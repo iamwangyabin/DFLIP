@@ -181,7 +181,7 @@ def main():
     if is_main_process:
         print("Creating baseline classifier model...")
     
-    model = create_baseline(config)
+    model = create_baseline(config, verbose=is_main_process)
     
     # Setup device
     if use_ddp:
@@ -194,9 +194,10 @@ def main():
     
     # Wrap with DDP if using distributed training
     if use_ddp:
-        # Add parameter usage diagnostics
-        print(f"Total model parameters: {sum(p.numel() for p in model.parameters())}")
-        print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+        # Add parameter usage diagnostics (only on main process)
+        if is_main_process:
+            print(f"Total model parameters: {sum(p.numel() for p in model.parameters())}")
+            print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
         model = DDP(
             model,

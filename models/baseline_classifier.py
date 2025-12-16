@@ -18,6 +18,7 @@ class BaselineClassifier(nn.Module):
         freeze_encoder: bool = True,
         hidden_dim: int = 512,
         dropout: float = 0.3,
+        verbose: bool = True,
     ):
         super().__init__()
         
@@ -71,7 +72,8 @@ class BaselineClassifier(nn.Module):
             nn.Linear(hidden_dim // 2, num_versions)
         )
         
-        self._print_trainable_parameters()
+        if verbose:
+            self._print_trainable_parameters()
     
     def _print_trainable_parameters(self):
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -105,7 +107,7 @@ class BaselineClassifier(nn.Module):
         }
 
 
-def create_baseline(config: Dict) -> BaselineClassifier:
+def create_baseline(config: Dict, verbose: bool = True) -> BaselineClassifier:
     """Create a baseline classifier with three heads."""
     model_config = config.get("model", {})
     bhep_config = config.get("bhep", {})
@@ -117,9 +119,11 @@ def create_baseline(config: Dict) -> BaselineClassifier:
         freeze_encoder=model_config.get("freeze_encoder", True),
         hidden_dim=512,
         dropout=0.3,
+        verbose=verbose,
     )
     
-    print(f"Created Baseline Classifier with 3 heads: "
-          f"detection (2), family ({bhep_config.get('num_families', 27)}), "
-          f"version ({bhep_config.get('num_versions', 1386)})")
+    if verbose:
+        print(f"Created Baseline Classifier with 3 heads: "
+              f"detection (2), family ({bhep_config.get('num_families', 27)}), "
+              f"version ({bhep_config.get('num_versions', 1386)})")
     return model
