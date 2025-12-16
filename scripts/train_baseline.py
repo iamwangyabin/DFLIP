@@ -298,8 +298,9 @@ def main():
         if is_main_process:
             print(f"\nTrain metrics: {train_metrics}")
         
-        # Validation and checkpoint saving (only on main process)
+        # Validation and test evaluation (only on main process)
         if not args.debug and is_main_process:
+            # Validation evaluation
             val_metrics = evaluate_baseline(
                 model,
                 val_loader,
@@ -307,6 +308,15 @@ def main():
                 loss_weights,
             )
             print(f"Val metrics: {val_metrics}")
+            
+            # Test evaluation (for observation only)
+            test_metrics = evaluate_baseline(
+                model,
+                test_loader,
+                criterions,
+                loss_weights,
+            )
+            print(f"Test metrics: {test_metrics}")
             
             # Log to logger
             if logger is not None and logger.is_active():
@@ -319,11 +329,18 @@ def main():
                         "val/det_acc": val_metrics["det_acc"],
                         "val/fam_acc": val_metrics["fam_acc"],
                         "val/ver_acc": val_metrics["ver_acc"],
+                        "test/loss": test_metrics["loss"],
+                        "test/det_loss": test_metrics["det_loss"],
+                        "test/fam_loss": test_metrics["fam_loss"],
+                        "test/ver_loss": test_metrics["ver_loss"],
+                        "test/det_acc": test_metrics["det_acc"],
+                        "test/fam_acc": test_metrics["fam_acc"],
+                        "test/ver_acc": test_metrics["ver_acc"],
                         "epoch": epoch,
                     }
                 )
             
-            # Determine if this is the best model
+            # Determine if this is the best model based on validation only
             # Use average accuracy as primary metric
             avg_acc = (val_metrics["det_acc"] + val_metrics["fam_acc"] + val_metrics["ver_acc"]) / 3
             is_best = avg_acc > best_val_acc
@@ -355,44 +372,15 @@ def main():
                 False
             )
     
-    # Final test evaluation after training completion
+    # Training completion summary
     if is_main_process and not args.debug:
         print("\n" + "=" * 50)
-        print("Evaluating on test set...")
+        print("Training completed!")
         print("=" * 50)
-        
-        test_metrics = evaluate_baseline(
-            model,
-            test_loader,
-            criterions,
-            loss_weights,
-        )
-        print(f"Test metrics: {test_metrics}")
-        
-        # Log test results
-        if logger is not None and logger.is_active():
-            logger.log(
-                {
-                    "test/loss": test_metrics["loss"],
-                    "test/det_loss": test_metrics["det_loss"],
-                    "test/fam_loss": test_metrics["fam_loss"],
-                    "test/ver_loss": test_metrics["ver_loss"],
-                    "test/det_acc": test_metrics["det_acc"],
-                    "test/fam_acc": test_metrics["fam_acc"],
-                    "test/ver_acc": test_metrics["ver_acc"],
-                }
-            )
     
     if is_main_process:
-        print("\n" + "=" * 50)
-        print("Training completed!")
         print(f"Best validation accuracy: {best_val_acc:.4f}")
         print(f"Best validation loss: {best_val_loss:.4f}")
-        if not args.debug:
-            print(f"Final test accuracy - Det: {test_metrics['det_acc']:.4f}, "
-                  f"Fam: {test_metrics['fam_acc']:.4f}, Ver: {test_metrics['ver_acc']:.4f}")
-            avg_test_acc = (test_metrics["det_acc"] + test_metrics["fam_acc"] + test_metrics["ver_acc"]) / 3
-            print(f"Average test accuracy: {avg_test_acc:.4f}")
         print(f"Checkpoints saved to: {config['training']['output_dir']}")
         print("=" * 50)
         
