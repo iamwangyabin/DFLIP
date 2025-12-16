@@ -1,7 +1,7 @@
 model:
   base_model: "vit_small_patch14_dinov2"
   cache_dir: "./models_cache"
-  freeze_encoder: true
+  freeze_encoder: false
   use_lora: false
 
 bhep:
