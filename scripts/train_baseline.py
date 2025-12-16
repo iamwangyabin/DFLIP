@@ -195,15 +195,9 @@ def main():
     # Wrap with DDP if using distributed training
     if use_ddp:
         # Add parameter usage diagnostics
-        print(f"[DEBUG] Total model parameters: {sum(p.numel() for p in model.parameters())}")
-        print(f"[DEBUG] Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-        
-        # Print parameter names and shapes for debugging
-        print("[DEBUG] Model parameter structure:")
-        for i, (name, param) in enumerate(model.named_parameters()):
-            if param.requires_grad:
-                print(f"  [{i:2d}] {name}: {param.shape} ({param.numel()} params)")
-        
+        print(f"Total model parameters: {sum(p.numel() for p in model.parameters())}")
+        print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
         model = DDP(
             model,
             device_ids=[local_rank],
