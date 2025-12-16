@@ -475,10 +475,23 @@ def evaluate_baseline(
     dataloader: DataLoader,
     criterions: Dict[str, nn.Module],
     loss_weights: Dict[str, float],
+    use_ddp: bool = False,
 ):
-    """Evaluate baseline classifier on validation set."""
+    """Evaluate baseline classifier on validation set.
+    
+    Args:
+        model: Model to evaluate (should be unwrapped if using DDP)
+        dataloader: DataLoader for evaluation
+        criterions: Loss functions dict
+        loss_weights: Loss weights dict
+        use_ddp: Whether to aggregate metrics across DDP processes
+    """
+    import torch.distributed as dist
     
     model.eval()
+    
+    # Get device from model
+    device = next(model.parameters()).device
     
     total_loss = 0.0
     total_det_loss = 0.0
@@ -492,10 +505,10 @@ def evaluate_baseline(
     fake_samples = 0
     
     for batch in tqdm(dataloader, desc="Evaluating"):
-        pixel_values = batch["pixel_values"].to(model.device)
-        is_fake = batch["is_fake"].to(model.device)
-        family_ids = batch["family_ids"].to(model.device)
-        version_ids = batch["version_ids"].to(model.device)
+        pixel_values = batch["pixel_values"].to(device)
+        is_fake = batch["is_fake"].to(device)
+        family_ids = batch["family_ids"].to(device)
+        version_ids = batch["version_ids"].to(device)
         
         # Forward pass
         outputs = model(pixel_values)
@@ -514,8 +527,8 @@ def evaluate_baseline(
                 version_ids[fake_mask]
             )
         else:
-            fam_loss = torch.tensor(0.0, device=model.device)
-            ver_loss = torch.tensor(0.0, device=model.device)
+            fam_loss = torch.tensor(0.0, device=device)
+            ver_loss = torch.tensor(0.0, device=device)
         
         loss = (loss_weights['detection'] * det_loss +
                 loss_weights['family'] * fam_loss +
@@ -541,7 +554,33 @@ def evaluate_baseline(
         
         total_samples += is_fake.size(0)
     
-    num_batches = max(len(dataloader), 1)
+    # Aggregate metrics across all DDP processes if needed
+    if use_ddp and dist.is_initialized():
+        # Convert to tensors for all_reduce
+        metrics_tensor = torch.tensor([
+            total_loss, total_det_loss, total_fam_loss, total_ver_loss,
+            det_correct, fam_correct, ver_correct, total_samples, fake_samples
+        ], dtype=torch.float32, device=device)
+        
+        # Sum across all processes
+        dist.all_reduce(metrics_tensor, op=dist.ReduceOp.SUM)
+        
+        # Extract aggregated values
+        (total_loss, total_det_loss, total_fam_loss, total_ver_loss,
+         det_correct, fam_correct, ver_correct, total_samples, fake_samples) = metrics_tensor.tolist()
+        
+        # Convert back to int for counts
+        det_correct = int(det_correct)
+        fam_correct = int(fam_correct)
+        ver_correct = int(ver_correct)
+        total_samples = int(total_samples)
+        fake_samples = int(fake_samples)
+        
+        # For loss averaging, we need to divide by total number of batches across all processes
+        world_size = dist.get_world_size()
+        num_batches = len(dataloader) * world_size
+    else:
+        num_batches = max(len(dataloader), 1)
     
     return {
         'loss': total_loss / num_batches,

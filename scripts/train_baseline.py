@@ -293,68 +293,84 @@ def main():
         if is_main_process:
             print(f"\nTrain metrics: {train_metrics}")
         
-        # Validation and test evaluation (only on main process)
-        if not args.debug and is_main_process:
-            # Validation evaluation
+        # Synchronize all processes before evaluation
+        if use_ddp:
+            dist.barrier()
+        
+        # Validation and test evaluation (all processes participate)
+        if not args.debug:
+            # Unwrap DDP model for evaluation to avoid synchronization issues
+            eval_model = model.module if use_ddp else model
+            
+            # All processes participate in evaluation with metrics aggregation
             val_metrics = evaluate_baseline(
-                model,
+                eval_model,
                 val_loader,
                 criterions,
                 loss_weights,
+                use_ddp=use_ddp,
             )
-            print(f"Val metrics: {val_metrics}")
             
             # Test evaluation (for observation only)
             test_metrics = evaluate_baseline(
-                model,
+                eval_model,
                 test_loader,
                 criterions,
                 loss_weights,
+                use_ddp=use_ddp,
             )
-            print(f"Test metrics: {test_metrics}")
             
-            # Log to logger
-            if logger is not None and logger.is_active():
-                logger.log(
-                    {
-                        "val/loss": val_metrics["loss"],
-                        "val/det_loss": val_metrics["det_loss"],
-                        "val/fam_loss": val_metrics["fam_loss"],
-                        "val/ver_loss": val_metrics["ver_loss"],
-                        "val/det_acc": val_metrics["det_acc"],
-                        "val/fam_acc": val_metrics["fam_acc"],
-                        "val/ver_acc": val_metrics["ver_acc"],
-                        "test/loss": test_metrics["loss"],
-                        "test/det_loss": test_metrics["det_loss"],
-                        "test/fam_loss": test_metrics["fam_loss"],
-                        "test/ver_loss": test_metrics["ver_loss"],
-                        "test/det_acc": test_metrics["det_acc"],
-                        "test/fam_acc": test_metrics["fam_acc"],
-                        "test/ver_acc": test_metrics["ver_acc"],
-                        "epoch": epoch,
-                    }
+            # Only main process handles logging and checkpoint saving
+            if is_main_process:
+                print(f"Val metrics: {val_metrics}")
+                print(f"Test metrics: {test_metrics}")
+                
+                # Log to logger
+                if logger is not None and logger.is_active():
+                    logger.log(
+                        {
+                            "val/loss": val_metrics["loss"],
+                            "val/det_loss": val_metrics["det_loss"],
+                            "val/fam_loss": val_metrics["fam_loss"],
+                            "val/ver_loss": val_metrics["ver_loss"],
+                            "val/det_acc": val_metrics["det_acc"],
+                            "val/fam_acc": val_metrics["fam_acc"],
+                            "val/ver_acc": val_metrics["ver_acc"],
+                            "test/loss": test_metrics["loss"],
+                            "test/det_loss": test_metrics["det_loss"],
+                            "test/fam_loss": test_metrics["fam_loss"],
+                            "test/ver_loss": test_metrics["ver_loss"],
+                            "test/det_acc": test_metrics["det_acc"],
+                            "test/fam_acc": test_metrics["fam_acc"],
+                            "test/ver_acc": test_metrics["ver_acc"],
+                            "epoch": epoch,
+                        }
+                    )
+                
+                # Determine if this is the best model based on validation only
+                # Use average accuracy as primary metric
+                avg_acc = (val_metrics["det_acc"] + val_metrics["fam_acc"] + val_metrics["ver_acc"]) / 3
+                is_best = avg_acc > best_val_acc
+                
+                if is_best:
+                    best_val_acc = avg_acc
+                    best_val_loss = val_metrics["loss"]
+                    print(f"New best model! Avg Val Acc: {best_val_acc:.4f}")
+                
+                # Save checkpoint (use unwrapped model)
+                save_checkpoint_baseline(
+                    eval_model,
+                    optimizer,
+                    scheduler,
+                    epoch,
+                    config,
+                    is_best
                 )
+        
+        # Synchronize all processes after evaluation and checkpointing
+        if use_ddp:
+            dist.barrier()
             
-            # Determine if this is the best model based on validation only
-            # Use average accuracy as primary metric
-            avg_acc = (val_metrics["det_acc"] + val_metrics["fam_acc"] + val_metrics["ver_acc"]) / 3
-            is_best = avg_acc > best_val_acc
-            
-            if is_best:
-                best_val_acc = avg_acc
-                best_val_loss = val_metrics["loss"]
-                print(f"New best model! Avg Val Acc: {best_val_acc:.4f}")
-            
-            # Save checkpoint (unwrap DDP if needed)
-            model_to_save = model.module if use_ddp else model
-            save_checkpoint_baseline(
-                model_to_save,
-                optimizer,
-                scheduler,
-                epoch,
-                config,
-                is_best
-            )
         elif args.debug and is_main_process:
             # Debug mode: save checkpoint each epoch
             model_to_save = model.module if use_ddp else model
