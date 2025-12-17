@@ -5,7 +5,7 @@ model:
 data:
   # Dataset paths
   metadata_path: "./assets/dflip3k_meta_processed.json"
-  image_root: "/media/DATASET/person_data/DFLIP3K_processed_traintest"
+  image_root: "/media/dataset/person_data/DFLIP3K_processed_traintest"
 
   # HuggingFace Datasets backend (optional)
   use_hf_dataset: false
