@@ -11,6 +11,8 @@ from PIL import Image
 from torchvision import transforms
 from datasets import load_from_disk
 
+from utils.transforms import build_transforms_from_config, build_legacy_transforms_from_config
+
 
 class ProfilingDataset(Dataset):
     """Dataset for BHEP Profiler training with hierarchical labels.
@@ -30,16 +32,24 @@ class ProfilingDataset(Dataset):
         Args:
             metadata_path: Path to dflip3k_meta.json
             image_root: Root directory for images
-            transform: Torchvision-style transform to apply to PIL images
+            transform: Torchvision-style transform to apply to PIL images (optional if config provided)
             split: "train", "val", or "test"
-            config: Configuration dict
+            config: Configuration dict (can contain transform specifications)
         """
 
         self.metadata_path = metadata_path
         self.image_root = image_root
-        self.transform = transform
         self.split = split
         self.config = config or {}
+
+        # Build transform from config if available, otherwise use provided transform
+        if config and self._has_transform_config(config):
+            self.transform = build_transforms_from_config(config, split)
+        elif transform is not None:
+            self.transform = transform
+        else:
+            # Fallback: basic ToTensor without normalization
+            self.transform = transforms.ToTensor()
 
         # Load metadata
         with open(metadata_path, "r", encoding="utf-8") as f:
@@ -47,6 +57,11 @@ class ProfilingDataset(Dataset):
 
         # Filter by split
         self.records = [r for r in self.all_records if r.get("split", "train") == split]
+    
+    def _has_transform_config(self, config: Dict) -> bool:
+        """Check if config contains transform specifications."""
+        data_cfg = config.get("data", {})
+        return "transforms" in data_cfg and self.split in data_cfg["transforms"]
 
     def __len__(self):
         return len(self.records)
@@ -102,10 +117,25 @@ class HFProfilingDataset(Dataset):
         hf_dataset,
         transform: Optional[Callable] = None,
         config: Dict = None,
+        split: str = "train",
     ):
         self.hf_dataset = hf_dataset
-        self.transform = transform
         self.config = config or {}
+        self.split = split
+
+        # Build transform from config if available, otherwise use provided transform
+        if config and self._has_transform_config(config):
+            self.transform = build_transforms_from_config(config, split)
+        elif transform is not None:
+            self.transform = transform
+        else:
+            # Fallback: basic ToTensor without normalization
+            self.transform = transforms.ToTensor()
+    
+    def _has_transform_config(self, config: Dict) -> bool:
+        """Check if config contains transform specifications."""
+        data_cfg = config.get("data", {})
+        return "transforms" in data_cfg and self.split in data_cfg["transforms"]
 
     def __len__(self) -> int:
         return len(self.hf_dataset)
@@ -196,6 +226,7 @@ def create_dataloader(
             hf_dataset=hf_split,
             transform=transform,
             config=config,
+            split=split,
         )
     else:
         dataset = ProfilingDataset(
@@ -307,11 +338,11 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform, t
         # Create datasets with proper transforms (only create once each)
         if use_hf:
             train_dataset = Subset(
-                HFProfilingDataset(full_train_hf, transform=train_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=train_transform, config=config, split="train"),
                 train_indices
             )
             val_dataset = Subset(
-                HFProfilingDataset(full_train_hf, transform=val_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=val_transform, config=config, split="val"),
                 val_indices
             )
         else:
@@ -360,13 +391,13 @@ def create_profiling_dataloaders(config: Dict, train_transform, val_transform, t
             hf_root = data_cfg.get("hf_dataset_path")
             ds_dict = load_from_disk(hf_root)
             if "test" in ds_dict:
-                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config, split="test")
             else:
                 print("Warning: No test split found in HF dataset, using validation transform on train split subset")
                 # Fallback: use a small subset of train for testing
                 test_indices = train_indices[:min(1000, len(train_indices)//10)]
                 test_dataset = Subset(
-                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config),
+                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config, split="test"),
                     test_indices
                 )
         else:
@@ -526,11 +557,11 @@ def create_profiling_dataloaders_ddp(
         # Create datasets with proper transforms (only load data once per dataset)
         if use_hf:
             train_dataset = Subset(
-                HFProfilingDataset(full_train_hf, transform=train_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=train_transform, config=config, split="train"),
                 train_indices
             )
             val_dataset = Subset(
-                HFProfilingDataset(full_train_hf, transform=val_transform, config=config),
+                HFProfilingDataset(full_train_hf, transform=val_transform, config=config, split="val"),
                 val_indices
             )
         else:
@@ -560,14 +591,14 @@ def create_profiling_dataloaders_ddp(
             hf_root = data_cfg.get("hf_dataset_path")
             ds_dict = load_from_disk(hf_root)
             if "test" in ds_dict:
-                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config, split="test")
             else:
                 if rank == 0:
                     print("Warning: No test split found in HF dataset, using validation transform on train split subset")
                 # Fallback: use a small subset of train for testing
                 test_indices = train_indices[:min(1000, len(train_indices)//10)]
                 test_dataset = Subset(
-                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config),
+                    HFProfilingDataset(full_train_hf, transform=test_transform, config=config, split="test"),
                     test_indices
                 )
         else:
@@ -610,16 +641,16 @@ def create_profiling_dataloaders_ddp(
             if "train" not in ds_dict or "val" not in ds_dict:
                 raise ValueError(f"HF dataset at {hf_root} must contain 'train' and 'val' splits for DDP.")
 
-            train_dataset = HFProfilingDataset(ds_dict["train"], transform=train_transform, config=config)
-            val_dataset = HFProfilingDataset(ds_dict["val"], transform=val_transform, config=config)
+            train_dataset = HFProfilingDataset(ds_dict["train"], transform=train_transform, config=config, split="train")
+            val_dataset = HFProfilingDataset(ds_dict["val"], transform=val_transform, config=config, split="val")
             
             # Create test dataset
             if "test" in ds_dict:
-                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config)
+                test_dataset = HFProfilingDataset(ds_dict["test"], transform=test_transform, config=config, split="test")
             else:
                 if rank == 0:
                     print("Warning: No test split found in HF dataset, using val dataset for testing")
-                test_dataset = HFProfilingDataset(ds_dict["val"], transform=test_transform, config=config)
+                test_dataset = HFProfilingDataset(ds_dict["val"], transform=test_transform, config=config, split="test")
         else:
             train_dataset = ProfilingDataset(
                 metadata_path=config["data"]["metadata_path"],
