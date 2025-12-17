@@ -1,6 +1,5 @@
 model:
-  base_model: "resnet50"
-  pretrained: true
+  clip_model_name: "ViT-L/14"
   cache_dir: "./models_cache"
 
 data:
@@ -24,36 +23,30 @@ data:
         size: 224
       - _target_: torchvision.transforms.RandomHorizontalFlip
         p: 0.5
-      - _target_: utils.transforms.DataAugment
-        blur_prob: 0.1
-        blur_sig: [0.0, 3.0]
-        jpg_prob: 0.1
-        jpg_method: ['cv2', 'pil']
-        jpg_qual: [30, 100]
       - _target_: torchvision.transforms.ToTensor
       - _target_: torchvision.transforms.Normalize
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+        mean: [0.48145466, 0.4578275, 0.40821073]
+        std: [0.26862954, 0.26130258, 0.27577711]
     
     val:
       - _target_: torchvision.transforms.Resize
-        size: 256
+        size: 224
       - _target_: torchvision.transforms.CenterCrop
         size: 224
       - _target_: torchvision.transforms.ToTensor
       - _target_: torchvision.transforms.Normalize
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+        mean: [0.48145466, 0.4578275, 0.40821073]
+        std: [0.26862954, 0.26130258, 0.27577711]
     
     test:
       - _target_: torchvision.transforms.Resize
-        size: 256
+        size: 224
       - _target_: torchvision.transforms.CenterCrop
         size: 224
       - _target_: torchvision.transforms.ToTensor
       - _target_: torchvision.transforms.Normalize
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+        mean: [0.48145466, 0.4578275, 0.40821073]
+        std: [0.26862954, 0.26130258, 0.27577711]
   
   # Dataloader settings
   num_workers: 8
@@ -79,7 +72,7 @@ training:
 
   save_strategy: "epoch"
   save_total_limit: 3
-  output_dir: "./checkpoints/cnndet_binary"
+  output_dir: "./checkpoints/ojha_binary"
 
   logging_steps: 50
   eval_strategy: "epoch"
@@ -89,7 +82,7 @@ logging:
   
   # SwanLab configuration
   swanlab_project: "dflip3k"
-  swanlab_experiment_name: 'cnndet'
+  swanlab_experiment_name: 'Ojha'
   
   # Legacy WandB support (disabled)
   use_wandb: false

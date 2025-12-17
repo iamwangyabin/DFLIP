@@ -1,5 +1,4 @@
 model:
-  base_model: "resnet50"
   pretrained: true
   cache_dir: "./models_cache"
 
@@ -79,7 +78,7 @@ training:
 
   save_strategy: "epoch"
   save_total_limit: 3
-  output_dir: "./checkpoints/cnndet_binary"
+  output_dir: "./checkpoints/npr_binary"
 
   logging_steps: 50
   eval_strategy: "epoch"
@@ -89,7 +88,7 @@ logging:
   
   # SwanLab configuration
   swanlab_project: "dflip3k"
-  swanlab_experiment_name: 'cnndet'
+  swanlab_experiment_name: 'npr'
   
   # Legacy WandB support (disabled)
   use_wandb: false
