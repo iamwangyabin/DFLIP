@@ -3,6 +3,7 @@ from .baseline_classifier import BaselineClassifier, create_baseline
 from .cnndet import CNNDetClassifier, create_cnndet
 from .ojha import OjhaClassifier, create_ojha
 from .npr import NPRClassifier, create_npr
+from .rine import RINEClassifier, create_rine
 
 __all__ = [
     'DFLIPProfiler',
@@ -16,4 +17,6 @@ __all__ = [
     'create_ojha',
     'NPRClassifier',
     'create_npr',
+    'RINEClassifier',
+    'create_rine',
 ]

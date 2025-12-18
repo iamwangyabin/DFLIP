@@ -1,5 +1,8 @@
 model:
-  clip_model_name: "ViT-L/14"
+  backbone0: "ViT-L/14"
+  backbone1: 768
+  nproj: 2
+  proj_dim: 512
   cache_dir: "./models_cache"
 
 data:
@@ -55,7 +58,7 @@ data:
 training:
   batch_size: 32
   gradient_accumulation_steps: 1
-  num_epochs: 1
+  num_epochs: 2
 
   optimizer: "adamw"
   learning_rate: 1.0e-4
@@ -72,7 +75,7 @@ training:
 
   save_strategy: "epoch"
   save_total_limit: 3
-  output_dir: "./checkpoints/ojha_binary"
+  output_dir: "./checkpoints/rine_binary"
 
   logging_steps: 50
   eval_strategy: "epoch"
@@ -82,7 +85,7 @@ logging:
   
   # SwanLab configuration
   swanlab_project: "dflip3k"
-  swanlab_experiment_name: 'Ojha'
+  swanlab_experiment_name: 'rine'
   
   # Legacy WandB support (disabled)
   use_wandb: false
