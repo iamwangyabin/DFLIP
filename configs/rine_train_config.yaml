@@ -1,6 +1,6 @@
 model:
   backbone0: "ViT-L/14"
-  backbone1: 768
+  backbone1: 1024  # Fixed: ViT-L/14 intermediate layers output 1024-dim features
   nproj: 2
   proj_dim: 512
   cache_dir: "./models_cache"
@@ -59,6 +59,7 @@ training:
   batch_size: 32
   gradient_accumulation_steps: 1
   num_epochs: 2
+  factor: 0.1  # Weight for supervised contrastive loss
 
   optimizer: "adamw"
   learning_rate: 1.0e-4

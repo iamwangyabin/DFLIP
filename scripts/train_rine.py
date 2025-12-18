@@ -21,6 +21,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import yaml
@@ -31,7 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.transforms import build_train_val_transforms  # noqa: E402
 from utils.seed import seed_everything  # noqa: E402
-from models.rine import create_rine  # noqa: E402
+from models.rine import create_rine, SupConLoss  # noqa: E402
 from dataset import create_profiling_dataloaders_ddp, create_profiling_dataloaders  # noqa: E402
 from utils.logger import create_logger  # noqa: E402
 
@@ -145,6 +146,7 @@ def train_epoch_rine(
     optimizer,
     scheduler,
     criterion: nn.Module,
+    supcon_loss: nn.Module,
     epoch: int,
     config: Dict,
     debug: bool = False,
@@ -157,8 +159,11 @@ def train_epoch_rine(
     model.train()
     train_config = config["training"]
     grad_accum = train_config["gradient_accumulation_steps"]
+    factor = train_config.get("factor", 0.1)
     
     total_loss = 0.0
+    total_ce_loss = 0.0
+    total_supcon_loss = 0.0
     correct = 0
     total_samples = 0
     
@@ -174,7 +179,19 @@ def train_epoch_rine(
         
         # Forward pass
         outputs = model(pixel_values)
-        loss = criterion(outputs['logits'], is_fake)
+        logits = outputs['logits']
+        features = outputs['features']
+        
+        # Cross-entropy loss
+        ce_loss = criterion(logits, is_fake)
+        
+        # Supervised contrastive loss
+        # Normalize features and add unsqueeze for n_views dimension
+        normalized_features = F.normalize(features).unsqueeze(1)
+        supcon_loss_val = supcon_loss(normalized_features, is_fake)
+        
+        # Combined loss
+        loss = ce_loss + factor * supcon_loss_val
         
         loss = loss / grad_accum
         loss.backward()
@@ -187,7 +204,9 @@ def train_epoch_rine(
         
         # Statistics
         total_loss += (loss.item() * grad_accum)
-        _, predicted = outputs['logits'].max(1)
+        total_ce_loss += ce_loss.item()
+        total_supcon_loss += supcon_loss_val.item()
+        _, predicted = logits.max(1)
         correct += predicted.eq(is_fake).sum().item()
         total_samples += is_fake.size(0)
         
@@ -195,6 +214,8 @@ def train_epoch_rine(
         accuracy = 100. * correct / total_samples
         pbar_dict = {
             'loss': f'{loss.item() * grad_accum:.4f}',
+            'ce': f'{ce_loss.item():.4f}',
+            'supcon': f'{supcon_loss_val.item():.4f}',
             'acc': f'{accuracy:.1f}%',
             'lr': f'{scheduler.get_last_lr()[0]:.2e}',
         }
@@ -204,6 +225,8 @@ def train_epoch_rine(
         if logger is not None and logger.is_active() and (step + 1) % train_config["logging_steps"] == 0:
             log_dict = {
                 "train/loss": loss.item() * grad_accum,
+                "train/ce_loss": ce_loss.item(),
+                "train/supcon_loss": supcon_loss_val.item(),
                 "train/accuracy": accuracy,
                 "train/learning_rate": scheduler.get_last_lr()[0],
                 "epoch": epoch,
@@ -216,6 +239,8 @@ def train_epoch_rine(
     
     metrics = {
         'loss': total_loss / num_steps,
+        'ce_loss': total_ce_loss / num_steps,
+        'supcon_loss': total_supcon_loss / num_steps,
         'accuracy': correct / total_samples if total_samples > 0 else 0.0,
     }
     
@@ -391,10 +416,11 @@ def main():
         )
     
     if is_main_process:
-        print("Setting up binary cross-entropy loss...")
+        print("Setting up binary cross-entropy loss and supervised contrastive loss...")
     
     # Setup loss for binary classification
     criterion = nn.CrossEntropyLoss()
+    supcon_loss = SupConLoss()
     
     # Calculate training steps
     train_config = config["training"]
@@ -446,6 +472,7 @@ def main():
             optimizer,
             scheduler,
             criterion,
+            supcon_loss,
             epoch,
             config,
             args.debug,
