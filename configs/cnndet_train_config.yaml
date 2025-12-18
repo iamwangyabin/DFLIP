@@ -24,12 +24,12 @@ data:
         size: 224
       - _target_: torchvision.transforms.RandomHorizontalFlip
         p: 0.5
-      - _target_: utils.transforms.DataAugment
-        blur_prob: 0.1
-        blur_sig: [0.0, 3.0]
-        jpg_prob: 0.1
-        jpg_method: ['cv2', 'pil']
-        jpg_qual: [30, 100]
+#      - _target_: utils.transforms.DataAugment
+#        blur_prob: 0.1
+#        blur_sig: [0.0, 3.0]
+#        jpg_prob: 0.1
+#        jpg_method: ['cv2', 'pil']
+#        jpg_qual: [30, 100]
       - _target_: torchvision.transforms.ToTensor
       - _target_: torchvision.transforms.Normalize
         mean: [0.485, 0.456, 0.406]
