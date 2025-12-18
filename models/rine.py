@@ -4,7 +4,6 @@ from torch.nn import functional as F
 from typing import Dict
 
 import clip
-from utils.registry import MODELS
 
 
 class Hook:
@@ -87,7 +86,6 @@ class RINEModel(nn.Module):
         return {'logits': p, 'z': z}
 
 
-@MODELS.register_module()
 class RINEClassifier(nn.Module):
     """
     RINE (Residual Intermediate Network Embedding) binary classifier adapted for the DFLIP framework.
