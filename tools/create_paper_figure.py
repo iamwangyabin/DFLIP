@@ -381,14 +381,14 @@ def create_publication_figure(
     # Limit to available slots
     model_data = model_data[:total_slots]
     
-    # Create figure with tight layout
+    # Create figure with tight layout - increased height to accommodate full model names
     fig_width = cols * 2.5
-    fig_height = rows * 2.8
+    fig_height = rows * 3.0  # Increased height for longer model names
     fig = plt.figure(figsize=(fig_width, fig_height))
     
-    # Create grid with reduced spacing
-    gs = GridSpec(rows, cols, figure=fig, hspace=0.08, wspace=0.05,
-                  left=0.02, right=0.98, top=0.92, bottom=0.02)
+    # Create grid with adjusted spacing to prevent text clipping
+    gs = GridSpec(rows, cols, figure=fig, hspace=0.12, wspace=0.05,
+                  left=0.02, right=0.98, top=0.90, bottom=0.02)
     
     # Set Times New Roman font for Ubuntu/Linux systems
     # Use matplotlib's rcParams to set font globally
@@ -452,9 +452,10 @@ def create_publication_figure(
                 # Display full model names without truncation
                 # Removed truncation logic to show complete model names
                 
-                ax.set_title(display_name, fontsize=7, pad=1, weight='bold',
+                # Set title with parameters to prevent truncation
+                ax.set_title(display_name, fontsize=7, pad=2, weight='bold',
                            fontproperties=times_font, wrap=False,
-                           horizontalalignment='center')
+                           horizontalalignment='center', clip_on=False)
                 ax.axis('off')
                 
             except Exception as e:
@@ -471,7 +472,8 @@ def create_publication_figure(
                     display_name = model_info['family_name'].replace('_', ' ').title()
                     print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
                 
-                ax.set_title(display_name, fontsize=8, pad=1, fontproperties=times_font)
+                ax.set_title(display_name, fontsize=7, pad=2, fontproperties=times_font,
+                           wrap=False, horizontalalignment='center', clip_on=False)
                 ax.axis('off')
         else:
             ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center',
@@ -486,7 +488,8 @@ def create_publication_figure(
                 display_name = model_info['family_name'].replace('_', ' ').title()
                 print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
             
-            ax.set_title(display_name, fontsize=8, pad=1, fontproperties=times_font)
+            ax.set_title(display_name, fontsize=7, pad=2, fontproperties=times_font,
+                       wrap=False, horizontalalignment='center', clip_on=False)
             ax.axis('off')
     
     # Fill empty slots
