@@ -449,9 +449,8 @@ def create_publication_figure(
                     display_name = model_info['family_name'].replace('_', ' ').title()
                     print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
                 
-                # Shorten long names if needed
-                if len(display_name) > 18:  # Increased threshold slightly
-                    display_name = display_name[:15] + "..."
+                # Display full model names without truncation
+                # Removed truncation logic to show complete model names
                 
                 ax.set_title(display_name, fontsize=8, pad=1, weight='bold',
                            fontproperties=times_font)
