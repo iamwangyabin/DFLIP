@@ -362,31 +362,27 @@ def create_publication_figure(
                 
                 ax.imshow(img)
                 
-                # Create clean title
+                # Create clean title - only show family name
                 family_name = model_info['family_name'].replace('_', ' ').title()
-                version_name = model_info['version_name'].replace('_', ' ')
                 
                 # Shorten long names
                 if len(family_name) > 12:
                     family_name = family_name[:12] + "..."
-                if len(version_name) > 15:
-                    version_name = version_name[:15] + "..."
                 
-                title = f"{family_name}\n{version_name}"
-                ax.set_title(title, fontsize=8, pad=3, weight='bold')
+                ax.set_title(family_name, fontsize=8, pad=3, weight='bold')
                 ax.axis('off')
                 
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
                 ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center', 
                        fontsize=10, color='red')
-                ax.set_title(f"{model_info['family_name']}\n{model_info['version_name']}", 
+                ax.set_title(model_info['family_name'].replace('_', ' ').title(),
                            fontsize=8, pad=3)
                 ax.axis('off')
         else:
             ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center', 
                    fontsize=10, color='red')
-            ax.set_title(f"{model_info['family_name']}\n{model_info['version_name']}", 
+            ax.set_title(model_info['family_name'].replace('_', ' ').title(),
                        fontsize=8, pad=3)
             ax.axis('off')
     
@@ -397,9 +393,7 @@ def create_publication_figure(
         ax = fig.add_subplot(gs[row, col])
         ax.axis('off')
     
-    # Add main title
-    plt.suptitle('Representative Samples from Different Generative Models in DFLIP3K Dataset', 
-                 fontsize=14, weight='bold', y=0.97)
+    # Main title removed as requested
     
     # Save figure
     plt.savefig(output_path, dpi=dpi, bbox_inches='tight', 
