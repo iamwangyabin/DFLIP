@@ -1,0 +1,113 @@
+model:
+  base_model: "aide"
+  pretrained: true
+  cache_dir: "./models_cache"
+  resnet_path: "https://download.pytorch.org/models/resnet50-19c8e357.pth"  # Path/URL to pretrained ResNet weights
+  convnext_path: "https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K/resolve/main/open_clip_pytorch_model.bin"  # ConvNeXt pretrained weights identifier or URL
+
+data:
+  # Dataset paths
+  metadata_path: "./assets/dflip3k_meta_processed.json"
+  image_root: "/media/dataset/person_dataset/DFLIP3K_processed_traintest"
+
+  # HuggingFace Datasets backend (optional)
+  use_hf_dataset: false
+  hf_dataset_path: null
+  
+  # Auto-split validation from training set
+  val_split_ratio: 0.1
+  val_split_seed: 42
+  
+  transforms:
+    train:
+      - _target_: torchvision.transforms.Resize
+        size: 256
+      - _target_: torchvision.transforms.RandomResizedCrop
+        size: 224
+      - _target_: torchvision.transforms.RandomHorizontalFlip
+        p: 0.5
+      # AIDE works better with minimal augmentation to preserve noise patterns
+#      - _target_: utils.transforms.DataAugment
+#        blur_prob: 0.05
+#        blur_sig: [0.0, 1.0]
+#        jpg_prob: 0.05
+#        jpg_method: ['cv2', 'pil']
+#        jpg_qual: [70, 100]
+      - _target_: torchvision.transforms.ToTensor
+      - _target_: torchvision.transforms.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    
+    val:
+      - _target_: torchvision.transforms.Resize
+        size: 256
+      - _target_: torchvision.transforms.CenterCrop
+        size: 224
+      - _target_: torchvision.transforms.ToTensor
+      - _target_: torchvision.transforms.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    
+    test:
+      - _target_: torchvision.transforms.Resize
+        size: 256
+      - _target_: torchvision.transforms.CenterCrop
+        size: 224
+      - _target_: torchvision.transforms.ToTensor
+      - _target_: torchvision.transforms.Normalize
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+  
+  # Dataloader settings
+  num_workers: 8
+  pin_memory: true
+
+training:
+  batch_size: 16  # Smaller batch size due to model complexity
+  gradient_accumulation_steps: 2  # Compensate with gradient accumulation
+  num_epochs: 25
+
+  optimizer: "adamw"
+  learning_rate: 5.0e-5  # Lower learning rate for stability
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+
+  fp16: false
+  bf16: true
+
+  save_strategy: "epoch"
+  save_total_limit: 3
+  output_dir: "./checkpoints/aide_binary"
+
+  logging_steps: 50
+  eval_strategy: "epoch"
+
+logging:
+  backend: "swanlab"
+  
+  # SwanLab configuration
+  swanlab_project: "dflip3k"
+  swanlab_experiment_name: 'aide'
+  
+  # Legacy WandB support (disabled)
+  use_wandb: false
+  wandb_project: "dflip3k"
+  wandb_entity: null
+  
+  log_level: "INFO"
+
+hardware:
+  seed: 42
+  cuda_deterministic: true
+  dataloader_num_workers: 8
+  
+  ddp: false
+  local_rank: -1
+  
+  use_deepspeed: false
+  deepspeed_config: null

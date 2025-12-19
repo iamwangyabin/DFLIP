@@ -4,6 +4,7 @@ from .cnndet import CNNDetClassifier, create_cnndet
 from .ojha import OjhaClassifier, create_ojha
 from .npr import NPRClassifier, create_npr
 from .rine import RINEClassifier, create_rine
+from .aide import AIDEClassifier, create_aide
 
 __all__ = [
     'DFLIPProfiler',
@@ -19,4 +20,6 @@ __all__ = [
     'create_npr',
     'RINEClassifier',
     'create_rine',
+    'AIDEClassifier',
+    'create_aide',
 ]
