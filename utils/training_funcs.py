@@ -628,3 +628,262 @@ def save_checkpoint_baseline(
         print(f"Saved best model to {output_dir / 'best_model.pt'}")
     
     print(f"Saved checkpoint to {output_dir}")
+
+
+# ============================================================================
+# Family Classifier Training Functions
+# ============================================================================
+
+def train_epoch_family_classifier(
+    model: nn.Module,
+    dataloader: DataLoader,
+    optimizer,
+    scheduler,
+    criterion: nn.Module,
+    epoch: int,
+    config: Dict,
+    debug: bool = False,
+    max_steps: int | None = None,
+    logger: BaseLogger | None = None,
+):
+    """Train family classifier for a single epoch."""
+    
+    model.train()
+    train_config = config["training"]
+    grad_accum = train_config["gradient_accumulation_steps"]
+    
+    total_loss = 0.0
+    total_family_loss = 0.0
+    family_correct = 0
+    total_valid_samples = 0
+    total_samples = 0
+    
+    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    
+    optimizer.zero_grad()
+    for step, batch in enumerate(progress_bar):
+        if max_steps is not None and step >= max_steps:
+            break
+        
+        pixel_values = batch["pixel_values"].to(model.device)
+        family_ids = batch["family_ids"].to(model.device)
+        is_fake = batch.get("is_fake", None)
+        if is_fake is not None:
+            is_fake = is_fake.to(model.device)
+        
+        # Forward pass
+        outputs = model(pixel_values)
+        
+        # Prepare targets
+        targets = {'family_ids': family_ids}
+        if is_fake is not None:
+            targets['is_fake'] = is_fake
+        
+        # Compute loss
+        loss_dict = criterion(outputs, targets)
+        loss = loss_dict["loss"] / grad_accum
+        
+        # Skip backward if no valid samples
+        if loss_dict["num_valid_samples"] > 0:
+            loss.backward()
+        
+        if (step + 1) % grad_accum == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+        
+        # Statistics
+        total_loss += loss_dict["loss"].item() if isinstance(loss_dict["loss"], torch.Tensor) else loss_dict["loss"]
+        total_family_loss += loss_dict["family_loss"]
+        total_valid_samples += loss_dict["num_valid_samples"]
+        total_samples += family_ids.size(0)
+        
+        # Compute accuracy only on valid samples
+        if loss_dict["num_valid_samples"] > 0:
+            # Find valid samples
+            if is_fake is not None:
+                valid_mask = (is_fake == 1) & (family_ids >= 0)
+            else:
+                valid_mask = family_ids >= 0
+            
+            if valid_mask.sum() > 0:
+                valid_logits = outputs['family_logits'][valid_mask]
+                valid_targets = family_ids[valid_mask]
+                _, family_pred = valid_logits.max(1)
+                family_correct += family_pred.eq(valid_targets).sum().item()
+        
+        # Update progress bar
+        pbar_dict = {
+            'loss': f'{loss_dict["loss"]:.4f}' if isinstance(loss_dict["loss"], torch.Tensor) else f'{loss_dict["loss"]:.4f}',
+            'lr': f'{scheduler.get_last_lr()[0]:.2e}',
+            'valid': f'{total_valid_samples}/{total_samples}',
+        }
+        if total_valid_samples > 0:
+            pbar_dict['fam_acc'] = f'{100.*family_correct/total_valid_samples:.1f}%'
+        progress_bar.set_postfix(pbar_dict)
+        
+        # Logging
+        if logger is not None and logger.is_active() and (step + 1) % train_config["logging_steps"] == 0:
+            log_dict = {
+                "train/loss": loss_dict["loss"].item() if isinstance(loss_dict["loss"], torch.Tensor) else loss_dict["loss"],
+                "train/family_loss": loss_dict["family_loss"],
+                "train/learning_rate": scheduler.get_last_lr()[0],
+                "train/valid_samples_ratio": total_valid_samples / total_samples if total_samples > 0 else 0.0,
+                "epoch": epoch,
+                "step": step,
+            }
+            if total_valid_samples > 0:
+                log_dict["train/family_acc"] = family_correct / total_valid_samples
+            logger.log(log_dict)
+    
+    num_steps = min(len(dataloader), max_steps) if max_steps is not None else len(dataloader)
+    num_steps = max(num_steps, 1)
+    
+    metrics = {
+        'loss': total_loss / num_steps,
+        'family_loss': total_family_loss / num_steps,
+        'family_acc': family_correct / total_valid_samples if total_valid_samples > 0 else 0.0,
+        'valid_samples_ratio': total_valid_samples / total_samples if total_samples > 0 else 0.0,
+        'total_valid_samples': total_valid_samples,
+        'total_samples': total_samples,
+    }
+    
+    return metrics
+
+
+@torch.no_grad()
+def evaluate_family_classifier(
+    model: nn.Module,
+    dataloader: DataLoader,
+    criterion: nn.Module,
+    use_ddp: bool = False,
+):
+    """Evaluate family classifier on validation set.
+    
+    Args:
+        model: Model to evaluate (should be unwrapped if using DDP)
+        dataloader: DataLoader for evaluation
+        criterion: Loss function
+        use_ddp: Whether to aggregate metrics across DDP processes
+    """
+    import torch.distributed as dist
+    
+    model.eval()
+    
+    # Get device from model
+    device = next(model.parameters()).device
+    
+    # Check if we should show progress bar (only main process in DDP)
+    show_progress = True
+    if use_ddp and dist.is_initialized():
+        show_progress = dist.get_rank() == 0
+    
+    total_loss = 0.0
+    total_family_loss = 0.0
+    family_correct = 0
+    total_valid_samples = 0
+    total_samples = 0
+    
+    # Only show tqdm on main process to avoid multiple progress bars
+    iterator = tqdm(dataloader, desc="Evaluating") if show_progress else dataloader
+    for batch in iterator:
+        pixel_values = batch["pixel_values"].to(device)
+        family_ids = batch["family_ids"].to(device)
+        is_fake = batch.get("is_fake", None)
+        if is_fake is not None:
+            is_fake = is_fake.to(device)
+        
+        # Forward pass
+        outputs = model(pixel_values)
+        
+        # Prepare targets
+        targets = {'family_ids': family_ids}
+        if is_fake is not None:
+            targets['is_fake'] = is_fake
+        
+        # Compute loss
+        loss_dict = criterion(outputs, targets)
+        
+        # Statistics
+        total_loss += loss_dict["loss"].item() if isinstance(loss_dict["loss"], torch.Tensor) else loss_dict["loss"]
+        total_family_loss += loss_dict["family_loss"]
+        total_valid_samples += loss_dict["num_valid_samples"]
+        total_samples += family_ids.size(0)
+        
+        # Compute accuracy only on valid samples
+        if loss_dict["num_valid_samples"] > 0:
+            # Find valid samples
+            if is_fake is not None:
+                valid_mask = (is_fake == 1) & (family_ids >= 0)
+            else:
+                valid_mask = family_ids >= 0
+            
+            if valid_mask.sum() > 0:
+                valid_logits = outputs['family_logits'][valid_mask]
+                valid_targets = family_ids[valid_mask]
+                _, family_pred = valid_logits.max(1)
+                family_correct += family_pred.eq(valid_targets).sum().item()
+    
+    # Aggregate metrics across all DDP processes if needed
+    if use_ddp and dist.is_initialized():
+        # Convert to tensors for all_reduce
+        metrics_tensor = torch.tensor([
+            total_loss, total_family_loss, family_correct, total_valid_samples, total_samples
+        ], dtype=torch.float32, device=device)
+        
+        # Sum across all processes
+        dist.all_reduce(metrics_tensor, op=dist.ReduceOp.SUM)
+        
+        # Extract aggregated values
+        (total_loss, total_family_loss, family_correct, total_valid_samples, total_samples) = metrics_tensor.tolist()
+        
+        # Convert back to int for counts
+        family_correct = int(family_correct)
+        total_valid_samples = int(total_valid_samples)
+        total_samples = int(total_samples)
+        
+        # For loss averaging, we need to divide by total number of batches across all processes
+        world_size = dist.get_world_size()
+        num_batches = len(dataloader) * world_size
+    else:
+        num_batches = max(len(dataloader), 1)
+    
+    return {
+        'loss': total_loss / num_batches,
+        'family_loss': total_family_loss / num_batches,
+        'family_acc': family_correct / total_valid_samples if total_valid_samples > 0 else 0.0,
+        'valid_samples_ratio': total_valid_samples / total_samples if total_samples > 0 else 0.0,
+        'total_valid_samples': total_valid_samples,
+        'total_samples': total_samples,
+    }
+
+
+def save_checkpoint_family_classifier(
+    model: nn.Module,
+    optimizer,
+    scheduler,
+    epoch: int,
+    config: Dict,
+    is_best: bool = False,
+):
+    """Save family classifier model checkpoint."""
+    output_dir = Path(config["training"]["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+    }
+    
+    # Save epoch checkpoint
+    torch.save(checkpoint, output_dir / f"checkpoint_epoch_{epoch}.pt")
+    
+    # Save best model if applicable
+    if is_best:
+        torch.save(checkpoint, output_dir / "best_model.pt")
+        print(f"Saved best model to {output_dir / 'best_model.pt'}")
+    
+    print(f"Saved checkpoint to {output_dir}")
