@@ -283,6 +283,64 @@ def sample_best_images(
     return sampled_images
 
 
+def get_model_name_mapping() -> Dict[str, str]:
+    """Create mapping from original family names to display names."""
+    return {
+        # Add mappings here - you may need to adjust the keys based on actual family names
+        'auraflow': 'AuraFlow',
+        'chroma': 'Chroma',
+        'flux_1_dev': 'FLUX.1 [dev]',
+        'flux_1_schnell': 'FLUX.1 [schnell]',
+        'flux_2_dev': 'FLUX.2 [dev]',
+        'gpt_image_1': 'GPT-Image 1',
+        'hidream_i1': 'HiDream-I1',
+        'hunyuan_dit': 'Hunyuan-DiT',
+        'illustrious': 'Illustrious',
+        'imagen_4': 'Imagen 4',
+        'kolors': 'Kolors',
+        'nano_banana': 'Nano-Banana',
+        'nano_banana_pro': 'Nano-Banana Pro',
+        'noobai': 'NoobAI',
+        'pixart': 'PixArt',
+        'playground_v2': 'Playground v2',
+        'pony_diffusion_v6': 'Pony Diffusion v6',
+        'pony_diffusion_v7': 'Pony Diffusion v7',
+        'qwen_image': 'Qwen-Image',
+        'stable_diffusion_1': 'Stable Diffusion 1',
+        'stable_diffusion_2': 'Stable Diffusion 2',
+        'stable_diffusion_3_5_large': 'Stable Diffusion 3.5 Large',
+        'stable_diffusion_3_5_medium': 'Stable Diffusion 3.5 Medium',
+        'stable_diffusion_xl': 'Stable Diffusion XL',
+        'seedream': 'Seedream',
+        'stable_cascade': 'Stable Cascade',
+        'z_image_turbo': 'Z-Image Turbo',
+        
+        # Alternative naming patterns (in case family names use different formats)
+        'aura_flow': 'AuraFlow',
+        'flux1_dev': 'FLUX.1 [dev]',
+        'flux1_schnell': 'FLUX.1 [schnell]',
+        'flux2_dev': 'FLUX.2 [dev]',
+        'gpt_image': 'GPT-Image 1',
+        'hidream': 'HiDream-I1',
+        'hunyuan': 'Hunyuan-DiT',
+        'imagen4': 'Imagen 4',
+        'nano_banana_pro': 'Nano-Banana Pro',
+        'noob_ai': 'NoobAI',
+        'pix_art': 'PixArt',
+        'playground_v2': 'Playground v2',
+        'pony_v6': 'Pony Diffusion v6',
+        'pony_v7': 'Pony Diffusion v7',
+        'qwen': 'Qwen-Image',
+        'sd1': 'Stable Diffusion 1',
+        'sd2': 'Stable Diffusion 2',
+        'sd3_5_large': 'Stable Diffusion 3.5 Large',
+        'sd3_5_medium': 'Stable Diffusion 3.5 Medium',
+        'sdxl': 'Stable Diffusion XL',
+        'stable_cascade': 'Stable Cascade',
+        'z_image': 'Z-Image Turbo',
+    }
+
+
 def create_publication_figure(
     sampled_images: Dict[int, str],
     version_stats: Dict,
@@ -372,29 +430,55 @@ def create_publication_figure(
                 
                 ax.imshow(img)
                 
-                # Create clean title - only show family name
-                family_name = model_info['family_name'].replace('_', ' ').title()
+                # Create clean title - use mapping if available, otherwise format original name
+                original_family_name = model_info['family_name'].lower()
+                name_mapping = get_model_name_mapping()
                 
-                # Shorten long names
-                if len(family_name) > 12:
-                    family_name = family_name[:12] + "..."
+                if original_family_name in name_mapping:
+                    display_name = name_mapping[original_family_name]
+                else:
+                    # Fallback to original formatting if no mapping found
+                    display_name = model_info['family_name'].replace('_', ' ').title()
+                    print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
                 
-                ax.set_title(family_name, fontsize=8, pad=1, weight='bold',
+                # Shorten long names if needed
+                if len(display_name) > 18:  # Increased threshold slightly
+                    display_name = display_name[:15] + "..."
+                
+                ax.set_title(display_name, fontsize=8, pad=1, weight='bold',
                            fontproperties=times_font)
                 ax.axis('off')
                 
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
-                ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center', 
+                ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center',
                        fontsize=10, color='red')
-                ax.set_title(model_info['family_name'].replace('_', ' ').title(),
-                           fontsize=8, pad=1, fontproperties=times_font)
+                
+                # Use mapping for error case too
+                original_family_name = model_info['family_name'].lower()
+                name_mapping = get_model_name_mapping()
+                if original_family_name in name_mapping:
+                    display_name = name_mapping[original_family_name]
+                else:
+                    display_name = model_info['family_name'].replace('_', ' ').title()
+                    print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
+                
+                ax.set_title(display_name, fontsize=8, pad=1, fontproperties=times_font)
                 ax.axis('off')
         else:
-            ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center', 
+            ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center',
                    fontsize=10, color='red')
-            ax.set_title(model_info['family_name'].replace('_', ' ').title(),
-                       fontsize=8, pad=1, fontproperties=times_font)
+            
+            # Use mapping for missing image case too
+            original_family_name = model_info['family_name'].lower()
+            name_mapping = get_model_name_mapping()
+            if original_family_name in name_mapping:
+                display_name = name_mapping[original_family_name]
+            else:
+                display_name = model_info['family_name'].replace('_', ' ').title()
+                print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
+            
+            ax.set_title(display_name, fontsize=8, pad=1, fontproperties=times_font)
             ax.axis('off')
     
     # Fill empty slots
@@ -432,11 +516,14 @@ def main():
     )
     print(f"Selected {len(selected_versions)} models")
     
-    # Print selected models
+    # Print selected models with display names
     print("\nSelected models:")
+    name_mapping = get_model_name_mapping()
     for i, vid in enumerate(selected_versions, 1):
         version_info = version_stats[vid]
-        print(f"{i:2d}. {version_info['family_name']}/{version_info['version_name']} "
+        original_name = version_info['family_name']
+        display_name = name_mapping.get(original_name.lower(), original_name.replace('_', ' ').title())
+        print(f"{i:2d}. {original_name} -> {display_name} "
               f"({version_info['count']} images)")
     
     print(f"\nSampling best images from '{args.split}' split...")
@@ -461,3 +548,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
