@@ -29,6 +29,7 @@ try:
     from matplotlib.gridspec import GridSpec
     import matplotlib.font_manager as fm
     import numpy as np
+
     HAS_IMAGING = True
 except ImportError:
     HAS_IMAGING = False
@@ -111,7 +112,7 @@ def analyze_models(records: List[Dict]) -> Tuple[Dict, Dict, Dict]:
         'count': 0,
         'versions': set()
     })
-    
+
     version_stats = defaultdict(lambda: {
         'family_id': None,
         'family_name': None,
@@ -119,84 +120,84 @@ def analyze_models(records: List[Dict]) -> Tuple[Dict, Dict, Dict]:
         'count': 0,
         'sample_paths': []
     })
-    
+
     family_to_versions = defaultdict(set)
-    
+
     # Only process fake images (real images have family_id=None)
     fake_records = [r for r in records if r['is_fake'] == 1]
     print(f"Debug: Found {len(fake_records)} fake records")
-    
+
     processed_count = 0
     for record in fake_records:
         family_id = record['family_id']
         version_id = record['version_id']
         image_path = record['image_path']
-        
+
         # Skip records with None IDs
         if family_id is None or version_id is None:
             continue
-        
+
         # Extract family and version names from path
         # Expected format: {split}/fake/family_name/version_name/image.jpg
         path_parts = Path(image_path).parts
         if len(path_parts) >= 4 and path_parts[1] == 'fake':
             family_name = path_parts[2]
             version_name = path_parts[3]
-            
+
             # Update family stats
             family_stats[family_id]['name'] = family_name
             family_stats[family_id]['count'] += 1
             family_stats[family_id]['versions'].add(version_id)
-            
+
             # Update version stats
             version_stats[version_id]['family_id'] = family_id
             version_stats[version_id]['family_name'] = family_name
             version_stats[version_id]['version_name'] = version_name
             version_stats[version_id]['count'] += 1
             version_stats[version_id]['sample_paths'].append(image_path)
-            
+
             # Update family to versions mapping
             family_to_versions[family_id].add(version_id)
-            
+
             processed_count += 1
-    
+
     print(f"Debug: Processed {processed_count} records with valid family/version IDs")
-    
+
     # Convert sets to lists
     for fid in family_stats:
         family_stats[fid]['versions'] = list(family_stats[fid]['versions'])
-    
+
     for fid in family_to_versions:
         family_to_versions[fid] = list(family_to_versions[fid])
-    
+
     return dict(family_stats), dict(version_stats), dict(family_to_versions)
 
 
 def select_representative_models(
-    family_stats: Dict,
-    version_stats: Dict,
-    family_to_versions: Dict,
-    target_models: int = 27,
-    seed: int = 42
+        family_stats: Dict,
+        version_stats: Dict,
+        family_to_versions: Dict,
+        target_models: int = 27,
+        seed: int = 42
 ) -> List[int]:
     """Select representative models ensuring diversity across families."""
     random.seed(seed)
-    
+
     # Sort families by number of versions (descending)
     families_by_importance = sorted(
         family_stats.items(),
         key=lambda x: len(x[1]['versions']),
         reverse=True
     )
-    
+
     selected_versions = []
     versions_per_family = {}
-    
+
     # First pass: select at least one version from each family
     for family_id, family_info in families_by_importance:
         if len(selected_versions) >= target_models:
             break
-            
+
         # Sort versions in this family by image count (descending)
         family_versions = family_to_versions[family_id]
         family_versions_sorted = sorted(
@@ -204,34 +205,34 @@ def select_representative_models(
             key=lambda vid: version_stats[vid]['count'],
             reverse=True
         )
-        
+
         # Select the version with most images from this family
         if family_versions_sorted:
             selected_version = family_versions_sorted[0]
             selected_versions.append(selected_version)
             versions_per_family[family_id] = [selected_version]
-    
+
     # Second pass: add more versions from families with many versions
     remaining_slots = target_models - len(selected_versions)
-    
+
     for _ in range(remaining_slots):
         best_family = None
         best_version = None
         best_score = -1
-        
+
         for family_id, family_info in families_by_importance:
             already_selected = versions_per_family.get(family_id, [])
             available_versions = [
                 vid for vid in family_to_versions[family_id]
                 if vid not in already_selected
             ]
-            
+
             if not available_versions:
                 continue
-                
+
             # Score = (total family versions) / (already selected from family + 1)
             score = len(family_info['versions']) / (len(already_selected) + 1)
-            
+
             if score > best_score:
                 # Select version with most images from available ones
                 best_version_candidate = max(
@@ -241,45 +242,45 @@ def select_representative_models(
                 best_family = family_id
                 best_version = best_version_candidate
                 best_score = score
-        
+
         if best_version is not None:
             selected_versions.append(best_version)
             if best_family not in versions_per_family:
                 versions_per_family[best_family] = []
             versions_per_family[best_family].append(best_version)
-    
+
     return selected_versions[:target_models]
 
 
 def sample_best_images(
-    records: List[Dict],
-    selected_versions: List[int],
-    split_filter: str = "train",
-    seed: int = 42
+        records: List[Dict],
+        selected_versions: List[int],
+        split_filter: str = "train",
+        seed: int = 42
 ) -> Dict[int, str]:
     """Sample one best representative image from each selected model."""
     random.seed(seed)
-    
+
     # Group records by version_id
     version_to_records = defaultdict(list)
     for record in records:
         if record['is_fake'] == 1:  # Only fake images
             if split_filter == "all" or record['split'] == split_filter:
                 version_to_records[record['version_id']].append(record)
-    
+
     sampled_images = {}
-    
+
     for version_id in selected_versions:
         available_records = version_to_records.get(version_id, [])
-        
+
         if not available_records:
             print(f"Warning: No images found for version_id {version_id}")
             continue
-        
+
         # Select a random representative image
         selected_record = random.choice(available_records)
         sampled_images[version_id] = selected_record['image_path']
-    
+
     return sampled_images
 
 
@@ -314,7 +315,7 @@ def get_model_name_mapping() -> Dict[str, str]:
         'stable_cascade': 'Stable Cascade',
         'aura_flow': 'AuraFlow',
         'hunyuan': 'Hunyuan-DiT',
-        
+
         # Additional alternative naming patterns for compatibility
         'auraflow': 'AuraFlow',
         'flux_1_dev': 'FLUX.1 [dev]',
@@ -350,20 +351,20 @@ def get_model_name_mapping() -> Dict[str, str]:
 
 
 def create_publication_figure(
-    sampled_images: Dict[int, str],
-    version_stats: Dict,
-    image_root: str,
-    output_path: str,
-    grid_size: str = "3x9",
-    image_size: int = 256,
-    dpi: int = 300
+        sampled_images: Dict[int, str],
+        version_stats: Dict,
+        image_root: str,
+        output_path: str,
+        grid_size: str = "3x9",
+        image_size: int = 256,
+        dpi: int = 300
 ) -> str:
     """Create a clean publication-ready figure."""
-    
+
     # Parse grid size
     rows, cols = map(int, grid_size.split('x'))
     total_slots = rows * cols
-    
+
     # Prepare model data
     model_data = []
     for version_id, image_path in sampled_images.items():
@@ -374,159 +375,155 @@ def create_publication_figure(
             'version_name': version_info['version_name'],
             'image_path': image_path
         })
-    
+
     # Sort by family name for consistent ordering
     model_data.sort(key=lambda x: (x['family_name'], x['version_name']))
-    
+
     # Limit to available slots
     model_data = model_data[:total_slots]
-    
-    # Create figure with tight layout - increased height to accommodate larger font model names
+
+    # --- MODIFIED: Increased figure height for larger fonts ---
     fig_width = cols * 2.5
-    fig_height = rows * 3.2  # Further increased height for larger fonts
+    fig_height = rows * 4.5  # Increased from 3.2 to 4.5
     fig = plt.figure(figsize=(fig_width, fig_height))
-    
-    # Create grid with adjusted spacing to prevent text clipping - increased hspace for larger fonts
-    gs = GridSpec(rows, cols, figure=fig, hspace=0.18, wspace=0.05,
-                  left=0.02, right=0.98, top=0.88, bottom=0.02)
-    
+
+    # --- MODIFIED: Adjusted GridSpec for more vertical space ---
+    # hspace: 0.18 -> 0.5 (More space between rows)
+    # top: 0.88 -> 0.95 (More space at the very top)
+    gs = GridSpec(rows, cols, figure=fig, hspace=0.5, wspace=0.05,
+                  left=0.02, right=0.98, top=0.95, bottom=0.02)
+
     # Set Times New Roman font for Ubuntu/Linux systems
-    # Use matplotlib's rcParams to set font globally
     plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times']
-    
-    # Create a simple font properties object - let matplotlib handle the font selection
+
     times_font = fm.FontProperties(family='serif')
-    print("Font configured: Using Times New Roman (from msttcorefonts)")
-    
+    print("Font configured: Using Times New Roman (or compatible serif font)")
+
     image_root_path = Path(image_root)
-    
+
+    # --- MODIFIED: Define larger font size ---
+    TITLE_FONT_SIZE = 24  # Changed from 14 to 24
+
     for i, model_info in enumerate(model_data):
         row = i // cols
         col = i % cols
-        
+
         ax = fig.add_subplot(gs[row, col])
-        
+
         # Load and display image
         img_path = image_root_path / model_info['image_path']
         if img_path.exists():
             try:
                 img = Image.open(img_path)
                 img = img.convert('RGB')
-                
-                # Central resize crop: resize shorter edge to target, then center crop
+
+                # Central resize crop
                 width, height = img.size
-                
-                # Resize so that the shorter edge matches image_size
                 if width < height:
                     new_width = image_size
                     new_height = int(height * image_size / width)
                 else:
                     new_height = image_size
                     new_width = int(width * image_size / height)
-                
+
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                
+
                 # Center crop to square
                 width, height = img.size
                 left = (width - image_size) // 2
                 top = (height - image_size) // 2
                 right = left + image_size
                 bottom = top + image_size
-                
+
                 img = img.crop((left, top, right, bottom))
-                
+
                 ax.imshow(img)
-                
-                # Create clean title - use mapping if available, otherwise format original name
+
+                # Create clean title
                 original_family_name = model_info['family_name'].lower()
                 name_mapping = get_model_name_mapping()
-                
+
                 if original_family_name in name_mapping:
                     display_name = name_mapping[original_family_name]
                 else:
-                    # Fallback to original formatting if no mapping found
                     display_name = model_info['family_name'].replace('_', ' ').title()
-                    print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
-                
-                # Display full model names without truncation
-                # Removed truncation logic to show complete model names
-                
-                # Set title with parameters to prevent truncation
-                ax.set_title(display_name, fontsize=14, pad=4, weight='bold',
-                           fontproperties=times_font, wrap=False,
-                           horizontalalignment='center', clip_on=False)
+                    print(
+                        f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
+
+                # --- MODIFIED: Larger fontsize and padding ---
+                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, weight='bold',
+                             fontproperties=times_font, wrap=False,
+                             horizontalalignment='center', clip_on=False)
                 ax.axis('off')
-                
+
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
                 ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center',
-                       fontsize=10, color='red')
-                
-                # Use mapping for error case too
+                        fontsize=10, color='red')
+
+                # Error fallback
                 original_family_name = model_info['family_name'].lower()
                 name_mapping = get_model_name_mapping()
                 if original_family_name in name_mapping:
                     display_name = name_mapping[original_family_name]
                 else:
                     display_name = model_info['family_name'].replace('_', ' ').title()
-                    print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
-                
-                ax.set_title(display_name, fontsize=14, pad=4, fontproperties=times_font,
-                           wrap=False, horizontalalignment='center', clip_on=False)
+
+                # --- MODIFIED: Larger fontsize ---
+                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, fontproperties=times_font,
+                             wrap=False, horizontalalignment='center', clip_on=False)
                 ax.axis('off')
         else:
             ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center',
-                   fontsize=10, color='red')
-            
-            # Use mapping for missing image case too
+                    fontsize=10, color='red')
+
+            # Not found fallback
             original_family_name = model_info['family_name'].lower()
             name_mapping = get_model_name_mapping()
             if original_family_name in name_mapping:
                 display_name = name_mapping[original_family_name]
             else:
                 display_name = model_info['family_name'].replace('_', ' ').title()
-                print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
-            
-            ax.set_title(display_name, fontsize=14, pad=4, fontproperties=times_font,
-                       wrap=False, horizontalalignment='center', clip_on=False)
+
+            # --- MODIFIED: Larger fontsize ---
+            ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, fontproperties=times_font,
+                         wrap=False, horizontalalignment='center', clip_on=False)
             ax.axis('off')
-    
+
     # Fill empty slots
     for i in range(len(model_data), total_slots):
         row = i // cols
         col = i % cols
         ax = fig.add_subplot(gs[row, col])
         ax.axis('off')
-    
-    # Main title removed as requested
-    
+
     # Save figure
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight', 
+    plt.savefig(output_path, dpi=dpi, bbox_inches='tight',
                 facecolor='white', edgecolor='none', pad_inches=0.1)
     plt.close()
-    
+
     return output_path
 
 
 def main():
     args = parse_args()
-    
+
     print("Loading metadata...")
     records = load_metadata(args.metadata)
     print(f"Loaded {len(records)} records")
-    
+
     print("\nAnalyzing models...")
     family_stats, version_stats, family_to_versions = analyze_models(records)
     print(f"Found {len(family_stats)} families and {len(version_stats)} versions")
-    
+
     print(f"\nSelecting {args.target_models} representative models...")
     selected_versions = select_representative_models(
         family_stats, version_stats, family_to_versions,
         target_models=args.target_models, seed=args.seed
     )
     print(f"Selected {len(selected_versions)} models")
-    
+
     # Print selected models with display names
     print("\nSelected models:")
     name_mapping = get_model_name_mapping()
@@ -536,20 +533,20 @@ def main():
         display_name = name_mapping.get(original_name.lower(), original_name.replace('_', ' ').title())
         print(f"{i:2d}. {original_name} -> {display_name} "
               f"({version_info['count']} images)")
-    
+
     print(f"\nSampling best images from '{args.split}' split...")
     sampled_images = sample_best_images(
         records, selected_versions, split_filter=args.split, seed=args.seed
     )
-    
+
     print(f"Sampled {len(sampled_images)} images")
-    
+
     print(f"\nCreating publication figure ({args.grid_size})...")
     output_path = create_publication_figure(
         sampled_images, version_stats, args.image_root, args.output,
         grid_size=args.grid_size, image_size=args.image_size, dpi=args.dpi
     )
-    
+
     print(f"\nFigure created successfully: {output_path}")
     print(f"Grid size: {args.grid_size}")
     print(f"Image size: {args.image_size}x{args.image_size} pixels")
@@ -559,6 +556,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
