@@ -2,8 +2,8 @@ model:
   base_model: "aide"
   pretrained: true
   cache_dir: "./models_cache"
-  resnet_path: "https://download.pytorch.org/models/resnet50-19c8e357.pth"  # Path/URL to pretrained ResNet weights
-  convnext_path: "https://huggingface.co/laion/CLIP-ViT-H-14-laion2B-s32B-b79K/resolve/main/open_clip_pytorch_model.bin"  # ConvNeXt pretrained weights identifier or URL
+  resnet_path: "./models_cache/resnet50-19c8e357.pth"  # Path to local pretrained ResNet weights
+  convnext_path: "./models_cache/open_clip_pytorch_model.bin"  # Path to local ConvNeXt pretrained weights
 
 data:
   # Dataset paths

@@ -5,12 +5,8 @@ Combines high-pass filtering, ResNet features, and ConvNeXt features for fake im
 
 import torch
 import torch.nn as nn
-import torch.utils.model_zoo as model_zoo
 import numpy as np
 import os
-import urllib.request
-import urllib.parse
-from pathlib import Path
 from typing import Dict, Optional
 from .srm_filter_kernel import all_normalized_hpf_list
 
@@ -22,99 +18,26 @@ except ImportError:
     print("Warning: open_clip not available. AIDE model will not work without it.")
 
 
-def download_pretrained_weights(url: str, cache_dir: str = "./models_cache", filename: Optional[str] = None) -> str:
-    """
-    Download pretrained weights from URL and cache them locally.
-    
-    Args:
-        url: URL to download weights from
-        cache_dir: Directory to cache downloaded weights
-        filename: Optional filename to save as. If None, uses filename from URL
-        
-    Returns:
-        Path to the downloaded file
-    """
-    # Create cache directory if it doesn't exist
-    cache_path = Path(cache_dir)
-    cache_path.mkdir(parents=True, exist_ok=True)
-    
-    # Determine filename
-    if filename is None:
-        parsed_url = urllib.parse.urlparse(url)
-        filename = os.path.basename(parsed_url.path)
-        if not filename:
-            filename = "pretrained_weights.pth"
-    
-    file_path = cache_path / filename
-    
-    # Check if file already exists
-    if file_path.exists():
-        print(f"Using cached weights: {file_path}")
-        return str(file_path)
-    
-    print(f"Downloading pretrained weights from {url}")
-    print(f"Saving to: {file_path}")
-    
-    try:
-        # Download with progress indication
-        def progress_hook(block_num, block_size, total_size):
-            if total_size > 0:
-                percent = min(100, (block_num * block_size * 100) // total_size)
-                print(f"\rDownload progress: {percent}%", end="", flush=True)
-        
-        urllib.request.urlretrieve(url, str(file_path), reporthook=progress_hook)
-        print(f"\nDownload completed: {file_path}")
-        return str(file_path)
-        
-    except Exception as e:
-        # Clean up partial download
-        if file_path.exists():
-            file_path.unlink()
-        raise RuntimeError(f"Failed to download weights from {url}: {e}")
-
-
-def load_resnet_weights_from_url_or_path(model_min, model_max, weight_source: str, cache_dir: str = "./models_cache"):
-    """
-    Load ResNet weights from either a local path or URL.
-    
-    Args:
-        model_min: ResNet model for minimum features
-        model_max: ResNet model for maximum features
-        weight_source: Either a local file path or URL to weights
-        cache_dir: Directory to cache downloaded weights
-    """
-    if weight_source is None:
+def load_resnet_weights(model_min, model_max, weight_path: str):
+    """Load ResNet weights from local path."""
+    if weight_path is None or not os.path.exists(weight_path):
         return
         
-    # Check if it's a URL
-    if weight_source.startswith(('http://', 'https://')):
-        # Download weights first
-        local_path = download_pretrained_weights(weight_source, cache_dir)
-    else:
-        # Use local path directly
-        local_path = weight_source
-        
     try:
-        print(f"Loading ResNet weights from: {local_path}")
-        pretrained_dict = torch.load(local_path, map_location='cpu')
+        pretrained_dict = torch.load(weight_path, map_location='cpu', weights_only=False)
         model_min_dict = model_min.state_dict()
         model_max_dict = model_max.state_dict()
 
-        loaded_keys = 0
         for k in pretrained_dict.keys():
             if k in model_min_dict and pretrained_dict[k].size() == model_min_dict[k].size():
                 model_min_dict[k] = pretrained_dict[k]
                 model_max_dict[k] = pretrained_dict[k]
-                loaded_keys += 1
-            else:
-                print(f"Skipping layer {k} because of size mismatch or missing key")
                 
         model_min.load_state_dict(model_min_dict)
         model_max.load_state_dict(model_max_dict)
-        print(f"Successfully loaded {loaded_keys} layers from ResNet weights")
         
     except Exception as e:
-        print(f"Warning: Could not load ResNet weights from {local_path}: {e}")
+        print(f"Warning: Could not load ResNet weights: {e}")
 
 
 class HPF(nn.Module):
@@ -329,24 +252,16 @@ class AIDEModel(nn.Module):
         self.model_min = ResNet(Bottleneck, [3, 4, 6, 3])
         self.model_max = ResNet(Bottleneck, [3, 4, 6, 3])
 
-        # Load pretrained ResNet weights if provided (supports both URLs and local paths)
-        load_resnet_weights_from_url_or_path(self.model_min, self.model_max, resnet_path, cache_dir)
+        # Load pretrained ResNet weights if provided
+        load_resnet_weights(self.model_min, self.model_max, resnet_path)
 
         self.fc = Mlp(2048 + 256, 1024, 2)
 
         # Initialize ConvNeXt model
-        print("Building model with convnext_xxl")
         try:
-            # Handle ConvNeXt weights - can be URL, local path, or pretrained identifier
-            if convnext_path and convnext_path.startswith(('http://', 'https://')):
-                # Download ConvNeXt weights if URL provided
-                local_convnext_path = download_pretrained_weights(convnext_path, cache_dir, "convnext_xxlarge.pth")
-                print(f"Using downloaded ConvNeXt weights: {local_convnext_path}")
-                # For downloaded weights, we might need to load them manually
-                # This depends on the format of the downloaded weights
-                convnext_pretrained = local_convnext_path
+            if convnext_path and os.path.exists(convnext_path):
+                convnext_pretrained = convnext_path
             else:
-                # Use as-is (could be pretrained identifier like "laion2b_s13b_b82k" or local path)
                 convnext_pretrained = convnext_path
             
             self.openclip_convnext_xxl, _, _ = open_clip.create_model_and_transforms(
@@ -362,7 +277,6 @@ class AIDEModel(nn.Module):
                 param.requires_grad = False
                 
         except Exception as e:
-            print(f"Warning: Could not load ConvNeXt model: {e}")
             # Create a dummy ConvNeXt replacement
             self.openclip_convnext_xxl = nn.Sequential(
                 nn.AdaptiveAvgPool2d((8, 8)),
@@ -463,15 +377,7 @@ class AIDEClassifier(nn.Module):
         if num_classes != 2:
             self.model.fc = Mlp(2048 + 256, 1024, num_classes)
         
-        if verbose:
-            self._print_trainable_parameters()
-    
-    def _print_trainable_parameters(self):
-        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        total_params = sum(p.numel() for p in self.parameters())
-        print(f"AIDE Binary Classifier:")
-        print(f"Trainable parameters: {trainable_params:,} / {total_params:,} "
-              f"({100 * trainable_params / total_params:.2f}%)")
+        pass
     
     def forward(self, pixel_values: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -508,11 +414,6 @@ def create_aide(config: Dict, verbose: bool = True) -> AIDEClassifier:
         verbose=verbose,
     )
     
-    if verbose:
-        print(f"Created AIDE Binary Classifier for real/fake detection")
-        if resnet_path:
-            print(f"  - ResNet weights: {resnet_path}")
-        if convnext_path:
-            print(f"  - ConvNeXt weights: {convnext_path}")
+    pass
     
     return model
