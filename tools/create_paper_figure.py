@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""Create a single PNG figure showing samples from 27 different generative models.
+
+This script creates a clean, publication-ready figure grid showing representative
+samples from different generative models in the DFLIP3K dataset.
+
+Usage:
+    python tools/create_paper_figure.py \
+        --metadata ./assets/dflip3k_meta.json \
+        --image-root /home/data/yabin/DFLIP3K \
+        --output paper_figure.png \
+        --grid-size "3x9" \
+        --image-size 256 \
+        --seed 42
+"""
+
+import argparse
+import json
+import random
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+# For image processing and figure generation
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib.gridspec import GridSpec
+    import numpy as np
+    HAS_IMAGING = True
+except ImportError:
+    HAS_IMAGING = False
+    print("Error: PIL and matplotlib are required. Install with: pip install Pillow matplotlib")
+    exit(1)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Create a single PNG figure showing samples from 27 different models"
+    )
+    parser.add_argument(
+        "--metadata",
+        type=str,
+        required=True,
+        help="Path to the metadata JSON file (e.g., ./assets/dflip3k_meta.json)",
+    )
+    parser.add_argument(
+        "--image-root",
+        type=str,
+        required=True,
+        help="Root directory containing the images (e.g., /home/data/yabin/DFLIP3K)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="paper_figure.png",
+        help="Output PNG file path",
+    )
+    parser.add_argument(
+        "--grid-size",
+        type=str,
+        default="3x9",
+        help="Grid layout (rows x cols), e.g., '3x9' for 3 rows, 9 columns",
+    )
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=256,
+        help="Size of each image in the grid (pixels)",
+    )
+    parser.add_argument(
+        "--target-models",
+        type=int,
+        default=27,
+        help="Number of models to include in the figure",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible sampling",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        choices=["train", "test", "all"],
+        help="Which data split to sample from",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="DPI for output image",
+    )
+    return parser.parse_args()
+
+
+def load_metadata(metadata_path: str) -> List[Dict]:
+    """Load metadata from JSON file."""
+    with open(metadata_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def analyze_models(records: List[Dict]) -> Tuple[Dict, Dict, Dict]:
+    """Analyze available models and their statistics."""
+    family_stats = defaultdict(lambda: {
+        'name': None,
+        'count': 0,
+        'versions': set()
+    })
+    
+    version_stats = defaultdict(lambda: {
+        'family_id': None,
+        'family_name': None,
+        'version_name': None,
+        'count': 0,
+        'sample_paths': []
+    })
+    
+    family_to_versions = defaultdict(set)
+    
+    # Only process fake images (real images have family_id=None)
+    fake_records = [r for r in records if r['is_fake'] == 1]
+    
+    for record in fake_records:
+        family_id = record['family_id']
+        version_id = record['version_id']
+        image_path = record['image_path']
+        
+        # Extract family and version names from path
+        # Expected format: fake/family_name/version_name/image.jpg
+        path_parts = Path(image_path).parts
+        if len(path_parts) >= 3 and path_parts[0] == 'fake':
+            family_name = path_parts[1]
+            version_name = path_parts[2]
+            
+            # Update family stats
+            family_stats[family_id]['name'] = family_name
+            family_stats[family_id]['count'] += 1
+            family_stats[family_id]['versions'].add(version_id)
+            
+            # Update version stats
+            version_stats[version_id]['family_id'] = family_id
+            version_stats[version_id]['family_name'] = family_name
+            version_stats[version_id]['version_name'] = version_name
+            version_stats[version_id]['count'] += 1
+            version_stats[version_id]['sample_paths'].append(image_path)
+            
+            # Update family to versions mapping
+            family_to_versions[family_id].add(version_id)
+    
+    # Convert sets to lists
+    for fid in family_stats:
+        family_stats[fid]['versions'] = list(family_stats[fid]['versions'])
+    
+    for fid in family_to_versions:
+        family_to_versions[fid] = list(family_to_versions[fid])
+    
+    return dict(family_stats), dict(version_stats), dict(family_to_versions)
+
+
+def select_representative_models(
+    family_stats: Dict,
+    version_stats: Dict,
+    family_to_versions: Dict,
+    target_models: int = 27,
+    seed: int = 42
+) -> List[int]:
+    """Select representative models ensuring diversity across families."""
+    random.seed(seed)
+    
+    # Sort families by number of versions (descending)
+    families_by_importance = sorted(
+        family_stats.items(),
+        key=lambda x: len(x[1]['versions']),
+        reverse=True
+    )
+    
+    selected_versions = []
+    versions_per_family = {}
+    
+    # First pass: select at least one version from each family
+    for family_id, family_info in families_by_importance:
+        if len(selected_versions) >= target_models:
+            break
+            
+        # Sort versions in this family by image count (descending)
+        family_versions = family_to_versions[family_id]
+        family_versions_sorted = sorted(
+            family_versions,
+            key=lambda vid: version_stats[vid]['count'],
+            reverse=True
+        )
+        
+        # Select the version with most images from this family
+        if family_versions_sorted:
+            selected_version = family_versions_sorted[0]
+            selected_versions.append(selected_version)
+            versions_per_family[family_id] = [selected_version]
+    
+    # Second pass: add more versions from families with many versions
+    remaining_slots = target_models - len(selected_versions)
+    
+    for _ in range(remaining_slots):
+        best_family = None
+        best_version = None
+        best_score = -1
+        
+        for family_id, family_info in families_by_importance:
+            already_selected = versions_per_family.get(family_id, [])
+            available_versions = [
+                vid for vid in family_to_versions[family_id]
+                if vid not in already_selected
+            ]
+            
+            if not available_versions:
+                continue
+                
+            # Score = (total family versions) / (already selected from family + 1)
+            score = len(family_info['versions']) / (len(already_selected) + 1)
+            
+            if score > best_score:
+                # Select version with most images from available ones
+                best_version_candidate = max(
+                    available_versions,
+                    key=lambda vid: version_stats[vid]['count']
+                )
+                best_family = family_id
+                best_version = best_version_candidate
+                best_score = score
+        
+        if best_version is not None:
+            selected_versions.append(best_version)
+            if best_family not in versions_per_family:
+                versions_per_family[best_family] = []
+            versions_per_family[best_family].append(best_version)
+    
+    return selected_versions[:target_models]
+
+
+def sample_best_images(
+    records: List[Dict],
+    selected_versions: List[int],
+    split_filter: str = "train",
+    seed: int = 42
+) -> Dict[int, str]:
+    """Sample one best representative image from each selected model."""
+    random.seed(seed)
+    
+    # Group records by version_id
+    version_to_records = defaultdict(list)
+    for record in records:
+        if record['is_fake'] == 1:  # Only fake images
+            if split_filter == "all" or record['split'] == split_filter:
+                version_to_records[record['version_id']].append(record)
+    
+    sampled_images = {}
+    
+    for version_id in selected_versions:
+        available_records = version_to_records.get(version_id, [])
+        
+        if not available_records:
+            print(f"Warning: No images found for version_id {version_id}")
+            continue
+        
+        # Select a random representative image
+        selected_record = random.choice(available_records)
+        sampled_images[version_id] = selected_record['image_path']
+    
+    return sampled_images
+
+
+def create_publication_figure(
+    sampled_images: Dict[int, str],
+    version_stats: Dict,
+    image_root: str,
+    output_path: str,
+    grid_size: str = "3x9",
+    image_size: int = 256,
+    dpi: int = 300
+) -> str:
+    """Create a clean publication-ready figure."""
+    
+    # Parse grid size
+    rows, cols = map(int, grid_size.split('x'))
+    total_slots = rows * cols
+    
+    # Prepare model data
+    model_data = []
+    for version_id, image_path in sampled_images.items():
+        version_info = version_stats[version_id]
+        model_data.append({
+            'version_id': version_id,
+            'family_name': version_info['family_name'],
+            'version_name': version_info['version_name'],
+            'image_path': image_path
+        })
+    
+    # Sort by family name for consistent ordering
+    model_data.sort(key=lambda x: (x['family_name'], x['version_name']))
+    
+    # Limit to available slots
+    model_data = model_data[:total_slots]
+    
+    # Create figure with tight layout
+    fig_width = cols * 2.5
+    fig_height = rows * 2.8
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    
+    # Create grid with minimal spacing
+    gs = GridSpec(rows, cols, figure=fig, hspace=0.15, wspace=0.1,
+                  left=0.02, right=0.98, top=0.92, bottom=0.02)
+    
+    image_root_path = Path(image_root)
+    
+    for i, model_info in enumerate(model_data):
+        row = i // cols
+        col = i % cols
+        
+        ax = fig.add_subplot(gs[row, col])
+        
+        # Load and display image
+        img_path = image_root_path / model_info['image_path']
+        if img_path.exists():
+            try:
+                img = Image.open(img_path)
+                img = img.convert('RGB')
+                
+                # Resize image to exact size
+                img = img.resize((image_size, image_size), Image.Resampling.LANCZOS)
+                
+                ax.imshow(img)
+                
+                # Create clean title
+                family_name = model_info['family_name'].replace('_', ' ').title()
+                version_name = model_info['version_name'].replace('_', ' ')
+                
+                # Shorten long names
+                if len(family_name) > 12:
+                    family_name = family_name[:12] + "..."
+                if len(version_name) > 15:
+                    version_name = version_name[:15] + "..."
+                
+                title = f"{family_name}\n{version_name}"
+                ax.set_title(title, fontsize=8, pad=3, weight='bold')
+                ax.axis('off')
+                
+            except Exception as e:
+                print(f"Error loading image {img_path}: {e}")
+                ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center', 
+                       fontsize=10, color='red')
+                ax.set_title(f"{model_info['family_name']}\n{model_info['version_name']}", 
+                           fontsize=8, pad=3)
+                ax.axis('off')
+        else:
+            ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center', 
+                   fontsize=10, color='red')
+            ax.set_title(f"{model_info['family_name']}\n{model_info['version_name']}", 
+                       fontsize=8, pad=3)
+            ax.axis('off')
+    
+    # Fill empty slots
+    for i in range(len(model_data), total_slots):
+        row = i // cols
+        col = i % cols
+        ax = fig.add_subplot(gs[row, col])
+        ax.axis('off')
+    
+    # Add main title
+    plt.suptitle('Representative Samples from Different Generative Models in DFLIP3K Dataset', 
+                 fontsize=14, weight='bold', y=0.97)
+    
+    # Save figure
+    plt.savefig(output_path, dpi=dpi, bbox_inches='tight', 
+                facecolor='white', edgecolor='none', pad_inches=0.1)
+    plt.close()
+    
+    return output_path
+
+
+def main():
+    args = parse_args()
+    
+    print("Loading metadata...")
+    records = load_metadata(args.metadata)
+    print(f"Loaded {len(records)} records")
+    
+    print("\nAnalyzing models...")
+    family_stats, version_stats, family_to_versions = analyze_models(records)
+    print(f"Found {len(family_stats)} families and {len(version_stats)} versions")
+    
+    print(f"\nSelecting {args.target_models} representative models...")
+    selected_versions = select_representative_models(
+        family_stats, version_stats, family_to_versions,
+        target_models=args.target_models, seed=args.seed
+    )
+    print(f"Selected {len(selected_versions)} models")
+    
+    # Print selected models
+    print("\nSelected models:")
+    for i, vid in enumerate(selected_versions, 1):
+        version_info = version_stats[vid]
+        print(f"{i:2d}. {version_info['family_name']}/{version_info['version_name']} "
+              f"({version_info['count']} images)")
+    
+    print(f"\nSampling best images from '{args.split}' split...")
+    sampled_images = sample_best_images(
+        records, selected_versions, split_filter=args.split, seed=args.seed
+    )
+    
+    print(f"Sampled {len(sampled_images)} images")
+    
+    print(f"\nCreating publication figure ({args.grid_size})...")
+    output_path = create_publication_figure(
+        sampled_images, version_stats, args.image_root, args.output,
+        grid_size=args.grid_size, image_size=args.image_size, dpi=args.dpi
+    )
+    
+    print(f"\nFigure created successfully: {output_path}")
+    print(f"Grid size: {args.grid_size}")
+    print(f"Image size: {args.image_size}x{args.image_size} pixels")
+    print(f"DPI: {args.dpi}")
+    print(f"Total models shown: {len(sampled_images)}")
+
+
+if __name__ == "__main__":
+    main()
