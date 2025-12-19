@@ -324,14 +324,17 @@ def create_publication_figure(
     gs = GridSpec(rows, cols, figure=fig, hspace=0.08, wspace=0.05,
                   left=0.02, right=0.98, top=0.92, bottom=0.02)
     
-    # Set Times-like serif font for Ubuntu/Linux systems
+    # Set Times New Roman font for Ubuntu/Linux systems
     # Use matplotlib's rcParams to set font globally
-    plt.rcParams['font.family'] = ['Liberation Serif', 'DejaVu Serif', 'Times', 'serif']
-    plt.rcParams['font.serif'] = ['Liberation Serif', 'DejaVu Serif', 'Times', 'Times New Roman']
+    plt.rcParams['font.family'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'serif']
+    plt.rcParams['font.serif'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times']
     
-    # Create a simple font properties object
+    # Force matplotlib to refresh font cache
+    fm._rebuild()
+    
+    # Create a simple font properties object - let matplotlib handle the font selection
     times_font = fm.FontProperties()
-    print("Font configured: Using system serif font (Liberation Serif/DejaVu Serif)")
+    print("Font configured: Using Times New Roman (from msttcorefonts)")
     
     image_root_path = Path(image_root)
     
