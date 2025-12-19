@@ -452,8 +452,9 @@ def create_publication_figure(
                 # Display full model names without truncation
                 # Removed truncation logic to show complete model names
                 
-                ax.set_title(display_name, fontsize=8, pad=1, weight='bold',
-                           fontproperties=times_font)
+                ax.set_title(display_name, fontsize=7, pad=1, weight='bold',
+                           fontproperties=times_font, wrap=False,
+                           horizontalalignment='center')
                 ax.axis('off')
                 
             except Exception as e:
