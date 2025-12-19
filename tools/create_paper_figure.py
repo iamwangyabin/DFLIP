@@ -27,6 +27,7 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     from matplotlib.gridspec import GridSpec
+    import matplotlib.font_manager as fm
     import numpy as np
     HAS_IMAGING = True
 except ImportError:
@@ -319,9 +320,24 @@ def create_publication_figure(
     fig_height = rows * 2.8
     fig = plt.figure(figsize=(fig_width, fig_height))
     
-    # Create grid with minimal spacing
-    gs = GridSpec(rows, cols, figure=fig, hspace=0.15, wspace=0.1,
+    # Create grid with reduced spacing
+    gs = GridSpec(rows, cols, figure=fig, hspace=0.08, wspace=0.05,
                   left=0.02, right=0.98, top=0.92, bottom=0.02)
+    
+    # Set Times New Roman font
+    try:
+        # Try to find Times New Roman font
+        times_font = fm.FontProperties(family='Times New Roman')
+        font_name = 'Times New Roman'
+    except:
+        try:
+            # Fallback to serif font
+            times_font = fm.FontProperties(family='serif')
+            font_name = 'serif'
+        except:
+            # Final fallback
+            times_font = fm.FontProperties()
+            font_name = 'default'
     
     image_root_path = Path(image_root)
     
@@ -369,7 +385,8 @@ def create_publication_figure(
                 if len(family_name) > 12:
                     family_name = family_name[:12] + "..."
                 
-                ax.set_title(family_name, fontsize=8, pad=3, weight='bold')
+                ax.set_title(family_name, fontsize=8, pad=1, weight='bold',
+                           fontproperties=times_font)
                 ax.axis('off')
                 
             except Exception as e:
@@ -377,13 +394,13 @@ def create_publication_figure(
                 ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center', 
                        fontsize=10, color='red')
                 ax.set_title(model_info['family_name'].replace('_', ' ').title(),
-                           fontsize=8, pad=3)
+                           fontsize=8, pad=1, fontproperties=times_font)
                 ax.axis('off')
         else:
             ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center', 
                    fontsize=10, color='red')
             ax.set_title(model_info['family_name'].replace('_', ' ').title(),
-                       fontsize=8, pad=3)
+                       fontsize=8, pad=1, fontproperties=times_font)
             ax.axis('off')
     
     # Fill empty slots
