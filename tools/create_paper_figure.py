@@ -338,8 +338,27 @@ def create_publication_figure(
                 img = Image.open(img_path)
                 img = img.convert('RGB')
                 
-                # Resize image to exact size
-                img = img.resize((image_size, image_size), Image.Resampling.LANCZOS)
+                # Central resize crop: resize shorter edge to target, then center crop
+                width, height = img.size
+                
+                # Resize so that the shorter edge matches image_size
+                if width < height:
+                    new_width = image_size
+                    new_height = int(height * image_size / width)
+                else:
+                    new_height = image_size
+                    new_width = int(width * image_size / height)
+                
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Center crop to square
+                width, height = img.size
+                left = (width - image_size) // 2
+                top = (height - image_size) // 2
+                right = left + image_size
+                bottom = top + image_size
+                
+                img = img.crop((left, top, right, bottom))
                 
                 ax.imshow(img)
                 
