@@ -324,38 +324,14 @@ def create_publication_figure(
     gs = GridSpec(rows, cols, figure=fig, hspace=0.08, wspace=0.05,
                   left=0.02, right=0.98, top=0.92, bottom=0.02)
     
-    # Set Times-like serif font
-    # Try different font names that are commonly available
-    font_candidates = [
-        'Times',           # macOS Times
-        'Times Roman',     # Alternative Times name
-        'Liberation Serif', # Linux alternative
-        'DejaVu Serif',    # Common serif font
-        'serif'            # Generic serif
-    ]
+    # Set Times-like serif font for Ubuntu/Linux systems
+    # Use matplotlib's rcParams to set font globally
+    plt.rcParams['font.family'] = ['Liberation Serif', 'DejaVu Serif', 'Times', 'serif']
+    plt.rcParams['font.serif'] = ['Liberation Serif', 'DejaVu Serif', 'Times', 'Times New Roman']
     
-    times_font = None
-    font_name = 'default'
-    
-    for font_candidate in font_candidates:
-        try:
-            # Check if font exists by trying to create FontProperties
-            test_font = fm.FontProperties(family=font_candidate)
-            # Test if the font actually resolves to the requested family
-            font_path = fm.findfont(test_font)
-            if font_path:
-                times_font = test_font
-                font_name = font_candidate
-                print(f"Using font: {font_name}")
-                break
-        except:
-            continue
-    
-    # Final fallback
-    if times_font is None:
-        times_font = fm.FontProperties(family='serif')
-        font_name = 'serif'
-        print(f"Using fallback font: {font_name}")
+    # Create a simple font properties object
+    times_font = fm.FontProperties()
+    print("Font configured: Using system serif font (Liberation Serif/DejaVu Serif)")
     
     image_root_path = Path(image_root)
     
