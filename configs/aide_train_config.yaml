@@ -64,8 +64,8 @@ data:
 
 training:
   batch_size: 16  # Smaller batch size due to model complexity
-  gradient_accumulation_steps: 2  # Compensate with gradient accumulation
-  num_epochs: 25
+  gradient_accumulation_steps: 1  # Compensate with gradient accumulation
+  num_epochs: 4
 
   optimizer: "adamw"
   learning_rate: 5.0e-5  # Lower learning rate for stability
