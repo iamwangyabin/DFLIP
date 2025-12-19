@@ -326,14 +326,11 @@ def create_publication_figure(
     
     # Set Times New Roman font for Ubuntu/Linux systems
     # Use matplotlib's rcParams to set font globally
-    plt.rcParams['font.family'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'serif']
+    plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times']
     
-    # Force matplotlib to refresh font cache
-    fm._rebuild()
-    
     # Create a simple font properties object - let matplotlib handle the font selection
-    times_font = fm.FontProperties()
+    times_font = fm.FontProperties(family='serif')
     print("Font configured: Using Times New Roman (from msttcorefonts)")
     
     image_root_path = Path(image_root)
