@@ -382,28 +382,33 @@ def create_publication_figure(
     # Limit to available slots
     model_data = model_data[:total_slots]
 
-    # --- MODIFIED: Increased figure height for larger fonts ---
+    # --- 布局核心参数修改区 ---
+    # 1. 设置更大的字号
+    TITLE_FONT_SIZE = 50  # 之前是24，现在加倍到50
+    TITLE_PAD = 15  # 文字和图片的距离
+
+    # 2. 调整画布高度：
+    # 宽度不变 (22.5 inch)
     fig_width = cols * 2.5
-    fig_height = rows * 4.5  # Increased from 3.2 to 4.5
+    # 高度缩减一些，去掉中间巨大的空白 (之前是 4.5)
+    fig_height = rows * 3.5
+
     fig = plt.figure(figsize=(fig_width, fig_height))
 
-    # --- MODIFIED: Adjusted GridSpec for more vertical space ---
-    # hspace: 0.18 -> 0.5 (More space between rows)
-    # top: 0.88 -> 0.95 (More space at the very top)
-    gs = GridSpec(rows, cols, figure=fig, hspace=0.5, wspace=0.05,
-                  left=0.02, right=0.98, top=0.95, bottom=0.02)
+    # 3. 调整GridSpec间距
+    # hspace: 行间距。之前是 0.5 (太大)，改为 0.25 (紧凑)
+    # top: 顶部留白。0.93 留出标题空间
+    gs = GridSpec(rows, cols, figure=fig, hspace=0.25, wspace=0.05,
+                  left=0.02, right=0.98, top=0.93, bottom=0.02)
 
-    # Set Times New Roman font for Ubuntu/Linux systems
+    # Set Times New Roman font
     plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times']
 
     times_font = fm.FontProperties(family='serif')
-    print("Font configured: Using Times New Roman (or compatible serif font)")
+    print(f"Configured: Font Size={TITLE_FONT_SIZE}, DPI={dpi}")
 
     image_root_path = Path(image_root)
-
-    # --- MODIFIED: Define larger font size ---
-    TITLE_FONT_SIZE = 24  # Changed from 14 to 24
 
     for i, model_info in enumerate(model_data):
         row = i // cols
@@ -448,11 +453,9 @@ def create_publication_figure(
                     display_name = name_mapping[original_family_name]
                 else:
                     display_name = model_info['family_name'].replace('_', ' ').title()
-                    print(
-                        f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
 
-                # --- MODIFIED: Larger fontsize and padding ---
-                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, weight='bold',
+                # 应用大字号
+                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, weight='bold',
                              fontproperties=times_font, wrap=False,
                              horizontalalignment='center', clip_on=False)
                 ax.axis('off')
@@ -460,9 +463,8 @@ def create_publication_figure(
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
                 ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center',
-                        fontsize=10, color='red')
+                        fontsize=20, color='red')
 
-                # Error fallback
                 original_family_name = model_info['family_name'].lower()
                 name_mapping = get_model_name_mapping()
                 if original_family_name in name_mapping:
@@ -470,15 +472,13 @@ def create_publication_figure(
                 else:
                     display_name = model_info['family_name'].replace('_', ' ').title()
 
-                # --- MODIFIED: Larger fontsize ---
-                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, fontproperties=times_font,
+                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, fontproperties=times_font,
                              wrap=False, horizontalalignment='center', clip_on=False)
                 ax.axis('off')
         else:
             ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center',
-                    fontsize=10, color='red')
+                    fontsize=20, color='red')
 
-            # Not found fallback
             original_family_name = model_info['family_name'].lower()
             name_mapping = get_model_name_mapping()
             if original_family_name in name_mapping:
@@ -486,8 +486,7 @@ def create_publication_figure(
             else:
                 display_name = model_info['family_name'].replace('_', ' ').title()
 
-            # --- MODIFIED: Larger fontsize ---
-            ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=12, fontproperties=times_font,
+            ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, fontproperties=times_font,
                          wrap=False, horizontalalignment='center', clip_on=False)
             ax.axis('off')
 
@@ -511,18 +510,15 @@ def main():
 
     print("Loading metadata...")
     records = load_metadata(args.metadata)
-    print(f"Loaded {len(records)} records")
 
     print("\nAnalyzing models...")
     family_stats, version_stats, family_to_versions = analyze_models(records)
-    print(f"Found {len(family_stats)} families and {len(version_stats)} versions")
 
     print(f"\nSelecting {args.target_models} representative models...")
     selected_versions = select_representative_models(
         family_stats, version_stats, family_to_versions,
         target_models=args.target_models, seed=args.seed
     )
-    print(f"Selected {len(selected_versions)} models")
 
     # Print selected models with display names
     print("\nSelected models:")
@@ -531,15 +527,12 @@ def main():
         version_info = version_stats[vid]
         original_name = version_info['family_name']
         display_name = name_mapping.get(original_name.lower(), original_name.replace('_', ' ').title())
-        print(f"{i:2d}. {original_name} -> {display_name} "
-              f"({version_info['count']} images)")
+        print(f"{i:2d}. {original_name} -> {display_name}")
 
     print(f"\nSampling best images from '{args.split}' split...")
     sampled_images = sample_best_images(
         records, selected_versions, split_filter=args.split, seed=args.seed
     )
-
-    print(f"Sampled {len(sampled_images)} images")
 
     print(f"\nCreating publication figure ({args.grid_size})...")
     output_path = create_publication_figure(
@@ -548,10 +541,6 @@ def main():
     )
 
     print(f"\nFigure created successfully: {output_path}")
-    print(f"Grid size: {args.grid_size}")
-    print(f"Image size: {args.image_size}x{args.image_size} pixels")
-    print(f"DPI: {args.dpi}")
-    print(f"Total models shown: {len(sampled_images)}")
 
 
 if __name__ == "__main__":
