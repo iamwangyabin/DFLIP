@@ -123,18 +123,24 @@ def analyze_models(records: List[Dict]) -> Tuple[Dict, Dict, Dict]:
     
     # Only process fake images (real images have family_id=None)
     fake_records = [r for r in records if r['is_fake'] == 1]
+    print(f"Debug: Found {len(fake_records)} fake records")
     
+    processed_count = 0
     for record in fake_records:
         family_id = record['family_id']
         version_id = record['version_id']
         image_path = record['image_path']
         
+        # Skip records with None IDs
+        if family_id is None or version_id is None:
+            continue
+        
         # Extract family and version names from path
-        # Expected format: fake/family_name/version_name/image.jpg
+        # Expected format: {split}/fake/family_name/version_name/image.jpg
         path_parts = Path(image_path).parts
-        if len(path_parts) >= 3 and path_parts[0] == 'fake':
-            family_name = path_parts[1]
-            version_name = path_parts[2]
+        if len(path_parts) >= 4 and path_parts[1] == 'fake':
+            family_name = path_parts[2]
+            version_name = path_parts[3]
             
             # Update family stats
             family_stats[family_id]['name'] = family_name
@@ -150,6 +156,10 @@ def analyze_models(records: List[Dict]) -> Tuple[Dict, Dict, Dict]:
             
             # Update family to versions mapping
             family_to_versions[family_id].add(version_id)
+            
+            processed_count += 1
+    
+    print(f"Debug: Processed {processed_count} records with valid family/version IDs")
     
     # Convert sets to lists
     for fid in family_stats:
