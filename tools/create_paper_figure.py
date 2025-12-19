@@ -324,20 +324,38 @@ def create_publication_figure(
     gs = GridSpec(rows, cols, figure=fig, hspace=0.08, wspace=0.05,
                   left=0.02, right=0.98, top=0.92, bottom=0.02)
     
-    # Set Times New Roman font
-    try:
-        # Try to find Times New Roman font
-        times_font = fm.FontProperties(family='Times New Roman')
-        font_name = 'Times New Roman'
-    except:
+    # Set Times-like serif font
+    # Try different font names that are commonly available
+    font_candidates = [
+        'Times',           # macOS Times
+        'Times Roman',     # Alternative Times name
+        'Liberation Serif', # Linux alternative
+        'DejaVu Serif',    # Common serif font
+        'serif'            # Generic serif
+    ]
+    
+    times_font = None
+    font_name = 'default'
+    
+    for font_candidate in font_candidates:
         try:
-            # Fallback to serif font
-            times_font = fm.FontProperties(family='serif')
-            font_name = 'serif'
+            # Check if font exists by trying to create FontProperties
+            test_font = fm.FontProperties(family=font_candidate)
+            # Test if the font actually resolves to the requested family
+            font_path = fm.findfont(test_font)
+            if font_path:
+                times_font = test_font
+                font_name = font_candidate
+                print(f"Using font: {font_name}")
+                break
         except:
-            # Final fallback
-            times_font = fm.FontProperties()
-            font_name = 'default'
+            continue
+    
+    # Final fallback
+    if times_font is None:
+        times_font = fm.FontProperties(family='serif')
+        font_name = 'serif'
+        print(f"Using fallback font: {font_name}")
     
     image_root_path = Path(image_root)
     
