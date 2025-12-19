@@ -453,7 +453,7 @@ def create_publication_figure(
                 # Removed truncation logic to show complete model names
                 
                 # Set title with parameters to prevent truncation
-                ax.set_title(display_name, fontsize=7, pad=2, weight='bold',
+                ax.set_title(display_name, fontsize=10, pad=2, weight='bold',
                            fontproperties=times_font, wrap=False,
                            horizontalalignment='center', clip_on=False)
                 ax.axis('off')
@@ -472,7 +472,7 @@ def create_publication_figure(
                     display_name = model_info['family_name'].replace('_', ' ').title()
                     print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
                 
-                ax.set_title(display_name, fontsize=7, pad=2, fontproperties=times_font,
+                ax.set_title(display_name, fontsize=10, pad=2, fontproperties=times_font,
                            wrap=False, horizontalalignment='center', clip_on=False)
                 ax.axis('off')
         else:
@@ -488,7 +488,7 @@ def create_publication_figure(
                 display_name = model_info['family_name'].replace('_', ' ').title()
                 print(f"Warning: No mapping found for '{model_info['family_name']}', using fallback: '{display_name}'")
             
-            ax.set_title(display_name, fontsize=7, pad=2, fontproperties=times_font,
+            ax.set_title(display_name, fontsize=10, pad=2, fontproperties=times_font,
                        wrap=False, horizontalalignment='center', clip_on=False)
             ax.axis('off')
     
