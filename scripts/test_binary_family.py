@@ -32,7 +32,7 @@ from tqdm import tqdm
 # 使用现有的imports
 from dataset import create_profiling_dataloaders
 from utils.transforms import build_transforms_from_config
-from models import create_npr, create_rine, create_ojha, create_aide
+from models import create_npr, create_rine, create_ojha, create_aide, create_cnndet
 
 
 def load_model(method, config_path, checkpoint_path, device='cuda'):
@@ -49,6 +49,8 @@ def load_model(method, config_path, checkpoint_path, device='cuda'):
         model = create_ojha(config, verbose=False)
     elif method == 'aide':
         model = create_aide(config, verbose=False)
+    elif method == 'cnndet':
+        model = create_cnndet(config, verbose=False)
     else:
         raise ValueError(f"Unsupported method: {method}")
     
@@ -128,7 +130,7 @@ def group_predictions_by_family(predictions, labels, scores, family_ids):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--method', required=True, choices=['npr', 'rine', 'ojha', 'aide'])
+    parser.add_argument('--method', required=True, choices=['npr', 'rine', 'ojha', 'aide', 'cnndet'])
     parser.add_argument('--config', required=True, help='Model config file')
     parser.add_argument('--checkpoint', required=True, help='Model checkpoint')
     parser.add_argument('--metadata', default='./tools/dflip3k_meta_fixed.json',
