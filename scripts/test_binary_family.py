@@ -214,6 +214,8 @@ def main():
                 acc = accuracy_score(lbls, preds) * 100
                 ap = average_precision_score(lbls, scrs) * 100
             
+            # Debug: Check the type of fid before using as dictionary key
+            print(f"[DEBUG] Family ID {fid} type: {type(fid)}")
             family_results[fid] = {'accuracy': acc, 'ap': ap}
             
             # 显示每个family的样本统计
