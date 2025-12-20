@@ -124,7 +124,7 @@ def group_predictions_by_family(predictions, labels, scores, family_ids):
     family_scores = defaultdict(list)
     
     for i in range(len(predictions)):
-        fid = family_ids[i]
+        fid = int(family_ids[i])  # Convert NumPy int64 to Python int
         if fid >= 0:  # 只处理有效的family_id (>=0)
             family_preds[fid].append(predictions[i])
             family_labels[fid].append(labels[i])
@@ -214,9 +214,9 @@ def main():
                 acc = accuracy_score(lbls, preds) * 100
                 ap = average_precision_score(lbls, scrs) * 100
             
-            # Debug: Check the type of fid before using as dictionary key
-            print(f"[DEBUG] Family ID {fid} type: {type(fid)}")
-            family_results[fid] = {'accuracy': acc, 'ap': ap}
+            # Ensure fid is Python int for JSON serialization
+            fid_key = int(fid) if hasattr(fid, 'item') else fid
+            family_results[fid_key] = {'accuracy': acc, 'ap': ap}
             
             # 显示每个family的样本统计
             fake_count = np.sum(lbls == 1)
