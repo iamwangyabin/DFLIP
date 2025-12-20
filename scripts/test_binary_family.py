@@ -28,6 +28,14 @@ from pathlib import Path
 from collections import defaultdict
 from sklearn.metrics import accuracy_score, average_precision_score
 from tqdm import tqdm
+import sys
+import os
+
+# Add project root to Python path to enable imports
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 # 使用现有的imports
 from dataset import create_profiling_dataloaders
