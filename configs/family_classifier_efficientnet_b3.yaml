@@ -1,5 +1,5 @@
 model:
-  base_model: "resnet50"
+  base_model: "efficientnet_b3"
   cache_dir: "./models_cache"
   freeze_encoder: false
   use_lora: false
@@ -20,8 +20,8 @@ data:
   val_split_ratio: 0.1
   val_split_seed: 42
   
-  # Data augmentation - ResNet typically uses 224x224
-  image_size: 224
+  # Data augmentation - EfficientNet-B3 uses 300x300
+  image_size: 300
   augmentation:
     horizontal_flip: true
     rotation_range: 15
@@ -33,8 +33,8 @@ data:
   pin_memory: true
 
 training:
-  batch_size: 32  # Larger batch size for smaller input size
-  gradient_accumulation_steps: 1
+  batch_size: 24  # Moderate batch size for 300x300 input
+  gradient_accumulation_steps: 2
   num_epochs: 20
 
   optimizer: "adamw"
@@ -52,7 +52,7 @@ training:
 
   save_strategy: "epoch"
   save_total_limit: 3
-  output_dir: "./checkpoints/family_classifier_resnet50"
+  output_dir: "./checkpoints/family_classifier_efficientnet_b3"
 
   logging_steps: 50
   eval_strategy: "epoch"
@@ -63,7 +63,7 @@ logging:
   
   # SwanLab configuration
   swanlab_project: "dflip3k"
-  swanlab_experiment_name: 'family-classifier-resnet50'
+  swanlab_experiment_name: 'family-classifier-efficientnet-b3'
   
   # Legacy WandB support (disabled)
   use_wandb: false
