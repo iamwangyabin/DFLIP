@@ -1,18 +1,46 @@
 #!/usr/bin/env python3
-"""Create frequency domain spectrum figures for different generative models.
+"""Create enhanced frequency domain spectrum figures for different generative models.
 
 This script analyzes the frequency domain characteristics of images from different
 generative models in the DFLIP3K dataset and creates publication-ready spectrum
-visualizations arranged in a grid layout.
+visualizations with enhanced artifact detection and improved visual representation.
+
+Key Features:
+- Strong DC component suppression to reduce central brightness dominance
+- High-pass filtering to emphasize periodic patterns and compression artifacts
+- Compression artifact detection using 8x8 DCT block pattern analysis
+- Quadrant-based frequency analysis for spatial distribution insights
+- Percentile-based normalization for improved contrast
+- Viridis colormap for better perceptual uniformity
+- Configurable artifact enhancement parameters
 
 Usage:
+    # Basic usage with enhanced processing (default)
     python tools/create_frequency_spectrum_figure.py \
         --metadata ./tools/dflip3k_meta_processed.json \
         --image-root /path/to/DFLIP3K \
-        --output frequency_spectrum_figure.png \
-        --grid-size "3x9" \
-        --samples-per-model 200 \
+        --output enhanced_frequency_spectrum.png
+    
+    # Advanced usage with custom parameters
+    python tools/create_frequency_spectrum_figure.py \
+        --metadata ./tools/dflip3k_meta_processed.json \
+        --image-root /path/to/DFLIP3K \
+        --output custom_spectrum.png \
+        --grid-size "4x8" \
+        --samples-per-model 300 \
+        --dc-radius 10 \
+        --high-pass-cutoff 0.08 \
+        --colormap viridis \
+        --show-quadrant-analysis \
         --seed 42
+    
+    # Disable enhancements for comparison
+    python tools/create_frequency_spectrum_figure.py \
+        --metadata ./tools/dflip3k_meta_processed.json \
+        --image-root /path/to/DFLIP3K \
+        --output original_spectrum.png \
+        --no-enhance-artifacts \
+        --colormap hot
 """
 
 import argparse
@@ -42,7 +70,7 @@ except ImportError:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Create frequency domain spectrum figures for different generative models"
+        description="Create enhanced frequency domain spectrum figures for different generative models"
     )
     parser.add_argument(
         "--metadata",
@@ -104,6 +132,55 @@ def parse_args():
         type=int,
         default=256,
         help="Size of the frequency spectrum visualization",
+    )
+    # Enhanced processing options
+    parser.add_argument(
+        "--enhance-artifacts",
+        action="store_true",
+        default=True,
+        help="Enable artifact enhancement processing (default: True)",
+    )
+    parser.add_argument(
+        "--no-enhance-artifacts",
+        action="store_false",
+        dest="enhance_artifacts",
+        help="Disable artifact enhancement processing",
+    )
+    parser.add_argument(
+        "--dc-suppression",
+        action="store_true",
+        default=True,
+        help="Enable DC component suppression (default: True)",
+    )
+    parser.add_argument(
+        "--no-dc-suppression",
+        action="store_false",
+        dest="dc_suppression",
+        help="Disable DC component suppression",
+    )
+    parser.add_argument(
+        "--dc-radius",
+        type=int,
+        default=8,
+        help="Radius for DC suppression mask (default: 8)",
+    )
+    parser.add_argument(
+        "--high-pass-cutoff",
+        type=float,
+        default=0.05,
+        help="High-pass filter cutoff frequency (default: 0.05)",
+    )
+    parser.add_argument(
+        "--colormap",
+        type=str,
+        default="viridis",
+        choices=["viridis", "plasma", "inferno", "magma", "Blues", "hot"],
+        help="Colormap for visualization (default: viridis)",
+    )
+    parser.add_argument(
+        "--show-quadrant-analysis",
+        action="store_true",
+        help="Show quadrant analysis information in console output",
     )
     return parser.parse_args()
 
@@ -297,8 +374,114 @@ def sample_images_for_spectrum_analysis(
     return sampled_images
 
 
-def compute_frequency_spectrum(image_path: str, spectrum_size: int = 256) -> Optional[np.ndarray]:
-    """Compute the 2D frequency spectrum of an image."""
+def create_dc_suppression_mask(size: int, dc_radius: int = 8) -> np.ndarray:
+    """Create a mask to suppress DC component (center frequencies)."""
+    center = size // 2
+    y, x = np.ogrid[:size, :size]
+    mask = np.sqrt((x - center)**2 + (y - center)**2) > dc_radius
+    return mask.astype(np.float32)
+
+
+def create_high_pass_filter(size: int, cutoff: float = 0.1) -> np.ndarray:
+    """Create a high-pass filter to emphasize high frequencies."""
+    center = size // 2
+    y, x = np.ogrid[:size, :size]
+    
+    # Normalized distance from center
+    distance = np.sqrt((x - center)**2 + (y - center)**2) / (size // 2)
+    
+    # Butterworth high-pass filter
+    n = 2  # Filter order
+    high_pass = 1 / (1 + (cutoff / (distance + 1e-8))**(2*n))
+    
+    return high_pass
+
+
+def detect_compression_artifacts(spectrum: np.ndarray, block_size: int = 8) -> np.ndarray:
+    """Detect compression artifacts by emphasizing 8x8 DCT block patterns."""
+    size = spectrum.shape[0]
+    center = size // 2
+    
+    # Create a mask that emphasizes frequencies corresponding to 8x8 blocks
+    artifact_mask = np.ones_like(spectrum)
+    
+    # Emphasize frequencies that are multiples of the block size
+    for i in range(1, size // (2 * block_size)):
+        freq = i * size // block_size
+        
+        # Vertical lines (compression artifacts)
+        if center - freq >= 0:
+            artifact_mask[:, center - freq] *= 2.0
+        if center + freq < size:
+            artifact_mask[:, center + freq] *= 2.0
+            
+        # Horizontal lines (compression artifacts)
+        if center - freq >= 0:
+            artifact_mask[center - freq, :] *= 2.0
+        if center + freq < size:
+            artifact_mask[center + freq, :] *= 2.0
+    
+    return artifact_mask
+
+
+def compute_quadrant_statistics(spectrum: np.ndarray) -> Dict[str, float]:
+    """Compute energy statistics for each quadrant of the frequency spectrum."""
+    h, w = spectrum.shape
+    center_h, center_w = h // 2, w // 2
+    
+    # Define quadrants
+    quadrants = {
+        'NW': spectrum[:center_h, :center_w],      # Top-left
+        'NE': spectrum[:center_h, center_w:],      # Top-right
+        'SW': spectrum[center_h:, :center_w],      # Bottom-left
+        'SE': spectrum[center_h:, center_w:]       # Bottom-right
+    }
+    
+    # Compute energy (sum of squares) for each quadrant
+    stats = {}
+    total_energy = np.sum(spectrum**2)
+    
+    for name, quad in quadrants.items():
+        energy = np.sum(quad**2)
+        stats[f'{name}_energy'] = energy
+        stats[f'{name}_ratio'] = energy / (total_energy + 1e-8)
+        stats[f'{name}_mean'] = np.mean(quad)
+        stats[f'{name}_std'] = np.std(quad)
+    
+    return stats
+
+
+def create_quadrant_difference_map(spectrum: np.ndarray) -> np.ndarray:
+    """Create a visualization showing quadrant differences."""
+    h, w = spectrum.shape
+    center_h, center_w = h // 2, w // 2
+    
+    # Get quadrants
+    nw = spectrum[:center_h, :center_w]
+    ne = spectrum[:center_h, center_w:]
+    sw = spectrum[center_h:, :center_w]
+    se = spectrum[center_h:, center_w:]
+    
+    # Create difference map
+    diff_map = np.zeros_like(spectrum)
+    
+    # Compute differences from mean
+    mean_energy = (np.mean(nw) + np.mean(ne) + np.mean(sw) + np.mean(se)) / 4
+    
+    diff_map[:center_h, :center_w] = np.abs(nw - mean_energy)
+    diff_map[:center_h, center_w:] = np.abs(ne - mean_energy)
+    diff_map[center_h:, :center_w] = np.abs(sw - mean_energy)
+    diff_map[center_h:, center_w:] = np.abs(se - mean_energy)
+    
+    return diff_map
+
+
+def compute_frequency_spectrum(image_path: str, spectrum_size: int = 256,
+                             enhance_artifacts: bool = True,
+                             dc_suppression: bool = True,
+                             dc_radius: int = 8,
+                             high_pass_cutoff: float = 0.05) -> Optional[np.ndarray]:
+    """Compute enhanced 2D frequency spectrum with artifact emphasis."""
     try:
         # Load image
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -315,8 +498,26 @@ def compute_frequency_spectrum(image_path: str, spectrum_size: int = 256) -> Opt
         # Compute magnitude spectrum
         magnitude_spectrum = np.abs(f_shift)
         
+        if enhance_artifacts:
+            # Apply DC suppression
+            if dc_suppression:
+                dc_mask = create_dc_suppression_mask(spectrum_size, dc_radius)
+                magnitude_spectrum = magnitude_spectrum * dc_mask
+            
+            # Apply high-pass filtering
+            high_pass = create_high_pass_filter(spectrum_size, high_pass_cutoff)
+            magnitude_spectrum = magnitude_spectrum * high_pass
+            
+            # Enhance compression artifacts
+            artifact_mask = detect_compression_artifacts(magnitude_spectrum)
+            magnitude_spectrum = magnitude_spectrum * artifact_mask
+        
         # Apply log transform for better visualization
         magnitude_spectrum = np.log(magnitude_spectrum + 1)
+        
+        # Percentile-based normalization for better contrast
+        p2, p98 = np.percentile(magnitude_spectrum, [2, 98])
+        magnitude_spectrum = np.clip((magnitude_spectrum - p2) / (p98 - p2 + 1e-8), 0, 1)
         
         return magnitude_spectrum
         
@@ -326,17 +527,24 @@ def compute_frequency_spectrum(image_path: str, spectrum_size: int = 256) -> Opt
 
 
 def compute_average_spectrum(
-        image_paths: List[str], 
-        image_root: str, 
-        spectrum_size: int = 256
+        image_paths: List[str],
+        image_root: str,
+        spectrum_size: int = 256,
+        enhance_artifacts: bool = True,
+        dc_suppression: bool = True,
+        dc_radius: int = 8,
+        high_pass_cutoff: float = 0.05
 ) -> Optional[np.ndarray]:
-    """Compute the average frequency spectrum from multiple images."""
+    """Compute the average enhanced frequency spectrum from multiple images."""
     spectrums = []
     image_root_path = Path(image_root)
     
     for image_path in image_paths:
         full_path = image_root_path / image_path
-        spectrum = compute_frequency_spectrum(str(full_path), spectrum_size)
+        spectrum = compute_frequency_spectrum(
+            str(full_path), spectrum_size, enhance_artifacts,
+            dc_suppression, dc_radius, high_pass_cutoff
+        )
         if spectrum is not None:
             spectrums.append(spectrum)
     
@@ -409,7 +617,13 @@ def create_frequency_spectrum_figure(
         output_path: str,
         grid_size: str = "3x9",
         spectrum_size: int = 256,
-        dpi: int = 300
+        dpi: int = 300,
+        enhance_artifacts: bool = True,
+        dc_suppression: bool = True,
+        dc_radius: int = 8,
+        high_pass_cutoff: float = 0.05,
+        colormap: str = "viridis",
+        show_quadrant_analysis: bool = False
 ) -> str:
     """Create a frequency spectrum figure with multiple models."""
     
@@ -462,18 +676,30 @@ def create_frequency_spectrum_figure(
 
         print(f"Processing model {i+1}/{len(model_data)}: {model_info['family_name']}")
 
-        # Compute average frequency spectrum
+        # Compute enhanced average frequency spectrum
         avg_spectrum = compute_average_spectrum(
-            model_info['image_paths'], 
-            image_root, 
-            spectrum_size
+            model_info['image_paths'],
+            image_root,
+            spectrum_size,
+            enhance_artifacts,
+            dc_suppression,
+            dc_radius,
+            high_pass_cutoff
         )
 
         if avg_spectrum is not None:
-            # Display spectrum
-            im = ax.imshow(avg_spectrum, cmap='hot', origin='lower')
+            # Display enhanced spectrum with viridis colormap
+            im = ax.imshow(avg_spectrum, cmap=colormap, origin='lower')
             ax.set_xticks([])
             ax.set_yticks([])
+            
+            # Optional quadrant analysis
+            if show_quadrant_analysis:
+                quad_stats = compute_quadrant_statistics(avg_spectrum)
+                print(f"  Quadrant analysis for {model_info['family_name']}:")
+                for quad in ['NW', 'NE', 'SW', 'SE']:
+                    ratio = quad_stats[f'{quad}_ratio']
+                    print(f"    {quad}: {ratio:.3f} energy ratio")
             
             # Add colorbar for reference (optional, can be removed for cleaner look)
             # plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -542,10 +768,13 @@ def main():
         split_filter=args.split, seed=args.seed
     )
 
-    print(f"\nCreating frequency spectrum figure ({args.grid_size})...")
+    print(f"\nCreating enhanced frequency spectrum figure ({args.grid_size})...")
     output_path = create_frequency_spectrum_figure(
         sampled_images, version_stats, args.image_root, args.output,
-        grid_size=args.grid_size, spectrum_size=args.spectrum_size, dpi=args.dpi
+        grid_size=args.grid_size, spectrum_size=args.spectrum_size, dpi=args.dpi,
+        enhance_artifacts=args.enhance_artifacts, dc_suppression=args.dc_suppression,
+        dc_radius=args.dc_radius, high_pass_cutoff=args.high_pass_cutoff,
+        colormap=args.colormap, show_quadrant_analysis=args.show_quadrant_analysis
     )
 
     print(f"\nFrequency spectrum figure created successfully: {output_path}")
