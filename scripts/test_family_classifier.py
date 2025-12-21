@@ -40,6 +40,37 @@ from dataset import create_profiling_dataloaders
 from utils.transforms import build_transforms_from_config
 from models.family_classifier import create_family_classifier
 
+# Family ID to Name mapping
+FAMILY_ID_TO_NAME = {
+    0: "aura_flow",
+    1: "chroma",
+    2: "flux.1_d",
+    3: "flux.1_s",
+    4: "flux2-dev",
+    5: "gpt-image-1",
+    6: "hidream",
+    7: "hunyuan",
+    8: "illustrious",
+    9: "imagen4",
+    10: "kolors",
+    11: "nano_banana",
+    12: "nano_banana_pro",
+    13: "noobai",
+    14: "pixart",
+    15: "playground_v2",
+    16: "pony",
+    17: "pony_v7",
+    18: "qwen",
+    19: "sd_1.5",
+    20: "sd_2.1",
+    21: "sd_3.5_large",
+    22: "sd_3.5_medium",
+    23: "sdxl_1.0",
+    24: "seedream",
+    25: "stable_cascade",
+    26: "z-image"
+}
+
 
 def load_family_classifier(config_path, checkpoint_path, device='cuda'):
     """加载家族分类器模型"""
@@ -198,13 +229,23 @@ def create_confusion_matrix_plot(cm, output_path, num_classes=27):
     # 计算百分比矩阵用于显示
     cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
     
+    # 创建家族标签（ID + 名称的简短版本）
+    family_labels = []
+    for i in range(num_classes):
+        family_name = FAMILY_ID_TO_NAME.get(i, f"unk_{i}")
+        # 使用简短标签以适应图表
+        short_name = family_name[:8] if len(family_name) > 8 else family_name
+        family_labels.append(f"{i}:{short_name}")
+    
     # 创建热力图
     sns.heatmap(cm_percent, annot=False, fmt='.1f', cmap='Blues',
-                xticklabels=range(num_classes), yticklabels=range(num_classes))
+                xticklabels=family_labels, yticklabels=family_labels)
     
     plt.title('Family Classification Confusion Matrix (%)', fontsize=16)
     plt.xlabel('Predicted Family', fontsize=12)
     plt.ylabel('True Family', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -241,7 +282,9 @@ def create_performance_plot(metrics, output_path, num_classes=27):
     ax1.set_ylabel('Score')
     ax1.set_title('Per-Family Performance Metrics')
     ax1.set_xticks(x)
-    ax1.set_xticklabels([str(i) for i in valid_families])
+    # 显示家族ID和名称
+    family_labels = [f"{i}\n{FAMILY_ID_TO_NAME.get(i, f'unk_{i}')}" for i in valid_families]
+    ax1.set_xticklabels(family_labels, rotation=45, ha='right')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
@@ -250,6 +293,9 @@ def create_performance_plot(metrics, output_path, num_classes=27):
     ax2.set_xlabel('Family ID')
     ax2.set_ylabel('Number of Samples')
     ax2.set_title('Sample Distribution per Family')
+    ax2.set_xticks(valid_families)
+    ax2.set_xticklabels([f"{i}\n{FAMILY_ID_TO_NAME.get(i, f'unk_{i}')}" for i in valid_families],
+                        rotation=45, ha='right')
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
@@ -291,23 +337,38 @@ def print_detailed_results(metrics, confused_pairs, num_classes=27):
     families_with_samples = [(i, support[i]) for i in range(num_classes) if support[i] > 0]
     families_with_samples.sort(key=lambda x: x[1], reverse=True)  # 按样本数排序
     
-    for family_id, sample_count in families_with_samples[:10]:  # 显示前10个
-        print(f"Family {family_id:2d}: Precision={precision[family_id]:.1%}, "
+    # 显示所有有样本的家族，不截断
+    for family_id, sample_count in families_with_samples:
+        family_name = FAMILY_ID_TO_NAME.get(family_id, f"unknown_{family_id}")
+        print(f"Family {family_id:2d} ({family_name}): Precision={precision[family_id]:.1%}, "
               f"Recall={recall[family_id]:.1%}, F1={f1[family_id]:.1%} "
               f"({sample_count} samples)")
     
-    if len(families_with_samples) > 10:
-        print(f"... and {len(families_with_samples) - 10} more families")
-    
-    # 最容易混淆的家族对
-    print(f"\n=== MOST CONFUSED FAMILY PAIRS ===")
-    for i, pair in enumerate(confused_pairs[:5]):  # 显示前5个
+    # 最容易混淆的家族对 - 显示所有混淆对
+    print(f"\n=== ALL CONFUSED FAMILY PAIRS ===")
+    for i, pair in enumerate(confused_pairs):  # 显示所有混淆对
         fam1, fam2 = pair['families']
+        fam1_name = FAMILY_ID_TO_NAME.get(fam1, f"unknown_{fam1}")
+        fam2_name = FAMILY_ID_TO_NAME.get(fam2, f"unknown_{fam2}")
         count = pair['confusion_count']
-        print(f"{i+1}. Family {fam1} ↔ Family {fam2}: {count} confusions")
+        i_to_j = pair['i_to_j']
+        j_to_i = pair['j_to_i']
+        print(f"{i+1:2d}. Family {fam1:2d} ({fam1_name}) ↔ Family {fam2:2d} ({fam2_name}): "
+              f"{count} total confusions ({fam1}→{fam2}: {i_to_j}, {fam2}→{fam1}: {j_to_i})")
     
     print(f"\nTotal families with samples: {len(families_with_samples)}")
     print(f"Total test samples: {sum(support)}")
+    
+    # 显示所有家族的完整列表（包括没有样本的）
+    print(f"\n=== COMPLETE FAMILY LIST ===")
+    for i in range(num_classes):
+        family_name = FAMILY_ID_TO_NAME.get(i, f"unknown_{i}")
+        if support[i] > 0:
+            print(f"Family {i:2d} ({family_name:20s}): "
+                  f"P={precision[i]:.1%}, R={recall[i]:.1%}, F1={f1[i]:.1%} "
+                  f"({support[i]:4d} samples)")
+        else:
+            print(f"Family {i:2d} ({family_name:20s}): No test samples")
 
 
 def save_results(metrics, confused_pairs, output_file):
@@ -323,18 +384,19 @@ def save_results(metrics, confused_pairs, output_file):
         },
         'per_family_metrics': {},
         'confusion_matrix': metrics['confusion_matrix'],
-        'most_confused_pairs': confused_pairs[:10]  # 保存前10个最容易混淆的对
+        'all_confused_pairs': confused_pairs  # 保存所有混淆对
     }
     
     # 添加每个家族的详细指标
     for i in range(len(metrics['per_class']['precision'])):
-        if metrics['per_class']['support'][i] > 0:  # 只保存有样本的家族
-            results['per_family_metrics'][str(i)] = {
-                'precision': metrics['per_class']['precision'][i],
-                'recall': metrics['per_class']['recall'][i],
-                'f1': metrics['per_class']['f1'][i],
-                'support': metrics['per_class']['support'][i]
-            }
+        family_name = FAMILY_ID_TO_NAME.get(i, f"unknown_{i}")
+        results['per_family_metrics'][str(i)] = {
+            'family_name': family_name,
+            'precision': metrics['per_class']['precision'][i],
+            'recall': metrics['per_class']['recall'][i],
+            'f1': metrics['per_class']['f1'][i],
+            'support': metrics['per_class']['support'][i]
+        }
     
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
