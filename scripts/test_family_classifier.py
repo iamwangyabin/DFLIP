@@ -42,34 +42,35 @@ from models.family_classifier import create_family_classifier
 
 # Family ID to Name mapping
 FAMILY_ID_TO_NAME = {
-    0: "aura_flow",
-    1: "chroma",
-    2: "flux.1_d",
-    3: "flux.1_s",
-    4: "flux2-dev",
-    5: "gpt-image-1",
-    6: "hidream",
-    7: "hunyuan",
-    8: "illustrious",
-    9: "imagen4",
-    10: "kolors",
-    11: "nano_banana",
-    12: "nano_banana_pro",
-    13: "noobai",
-    14: "pixart",
-    15: "playground_v2",
-    16: "pony",
-    17: "pony_v7",
-    18: "qwen",
-    19: "sd_1.5",
-    20: "sd_2.1",
-    21: "sd_3.5_large",
-    22: "sd_3.5_medium",
-    23: "sdxl_1.0",
-    24: "seedream",
-    25: "stable_cascade",
-    26: "z-image"
+    0: "AuraFlow",
+    1: "Chroma",
+    2: "FLUX.1-d",
+    3: "FLUX.1-s",
+    4: "FLUX.2-d",
+    5: "GPT-Img 1",
+    6: "HiDream",
+    7: "Hunyuan",
+    8: "Illustrious",
+    9: "Imagen 4",
+    10: "Kolors",
+    11: "NaBan.",
+    12: "NaBan. Pro",
+    13: "NoobAI",
+    14: "PixArt",
+    15: "Playground",
+    16: "Pony v6",
+    17: "Pony v7",
+    18: "Qwen-Image",
+    19: "SD 1.5",
+    20: "SD 2.1",
+    21: "SD 3.5-L",
+    22: "SD 3.5-M",
+    23: "SD XL",
+    24: "SeeDream",
+    25: "Sta. Cas.",
+    26: "Z-Image"
 }
+
 
 
 def load_family_classifier(config_path, checkpoint_path, device='cuda'):
@@ -158,6 +159,10 @@ def compute_multiclass_metrics(y_true, y_pred, y_probs, num_classes=27):
         y_true, y_pred, average=None, labels=range(num_classes), zero_division=0
     )
     
+    # 计算每个类别的accuracy (正确分类的样本数 / 该类别的总样本数)
+    # 对于多分类，每个类别的accuracy就是recall
+    per_class_accuracy = recall.copy()
+    
     # 宏平均和微平均
     macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
         y_true, y_pred, average='macro', zero_division=0
@@ -177,6 +182,7 @@ def compute_multiclass_metrics(y_true, y_pred, y_probs, num_classes=27):
         'top3_accuracy': top3_accuracy,
         'top5_accuracy': top5_accuracy,
         'per_class': {
+            'accuracy': per_class_accuracy.tolist(),
             'precision': precision.tolist(),
             'recall': recall.tolist(),
             'f1': f1.tolist(),
@@ -229,19 +235,20 @@ def create_confusion_matrix_plot(cm, output_path, num_classes=27):
     # 计算百分比矩阵用于显示
     cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
     
-    # 创建家族标签（ID + 名称的简短版本）
+    # 创建家族标签（只显示名称，不显示ID）
     family_labels = []
     for i in range(num_classes):
         family_name = FAMILY_ID_TO_NAME.get(i, f"unk_{i}")
         # 使用简短标签以适应图表
         short_name = family_name[:8] if len(family_name) > 8 else family_name
-        family_labels.append(f"{i}:{short_name}")
+        family_labels.append(short_name)
     
     # 创建热力图
     sns.heatmap(cm_percent, annot=False, fmt='.1f', cmap='Blues',
                 xticklabels=family_labels, yticklabels=family_labels)
     
-    plt.title('Family Classification Confusion Matrix (%)', fontsize=16)
+    # 不显示标题
+    # plt.title('Family Classification Confusion Matrix (%)', fontsize=16)
     plt.xlabel('Predicted Family', fontsize=12)
     plt.ylabel('True Family', fontsize=12)
     plt.xticks(rotation=45, ha='right')
@@ -256,6 +263,7 @@ def create_confusion_matrix_plot(cm, output_path, num_classes=27):
 def create_performance_plot(metrics, output_path, num_classes=27):
     """创建每个家族性能对比图"""
     families = list(range(num_classes))
+    accuracy = metrics['per_class']['accuracy']
     precision = metrics['per_class']['precision']
     recall = metrics['per_class']['recall']
     f1 = metrics['per_class']['f1']
@@ -272,18 +280,19 @@ def create_performance_plot(metrics, output_path, num_classes=27):
     
     # 性能指标图
     x = np.arange(len(valid_families))
-    width = 0.25
+    width = 0.2
     
-    ax1.bar(x - width, [precision[i] for i in valid_families], width, label='Precision', alpha=0.8)
-    ax1.bar(x, [recall[i] for i in valid_families], width, label='Recall', alpha=0.8)
-    ax1.bar(x + width, [f1[i] for i in valid_families], width, label='F1-Score', alpha=0.8)
+    ax1.bar(x - 1.5*width, [accuracy[i] for i in valid_families], width, label='Accuracy', alpha=0.8)
+    ax1.bar(x - 0.5*width, [precision[i] for i in valid_families], width, label='Precision', alpha=0.8)
+    ax1.bar(x + 0.5*width, [recall[i] for i in valid_families], width, label='Recall', alpha=0.8)
+    ax1.bar(x + 1.5*width, [f1[i] for i in valid_families], width, label='F1-Score', alpha=0.8)
     
     ax1.set_xlabel('Family ID')
     ax1.set_ylabel('Score')
     ax1.set_title('Per-Family Performance Metrics')
     ax1.set_xticks(x)
-    # 显示家族ID和名称
-    family_labels = [f"{i}\n{FAMILY_ID_TO_NAME.get(i, f'unk_{i}')}" for i in valid_families]
+    # 只显示家族名称，不显示ID
+    family_labels = [FAMILY_ID_TO_NAME.get(i, f'unk_{i}') for i in valid_families]
     ax1.set_xticklabels(family_labels, rotation=45, ha='right')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
@@ -294,7 +303,7 @@ def create_performance_plot(metrics, output_path, num_classes=27):
     ax2.set_ylabel('Number of Samples')
     ax2.set_title('Sample Distribution per Family')
     ax2.set_xticks(valid_families)
-    ax2.set_xticklabels([f"{i}\n{FAMILY_ID_TO_NAME.get(i, f'unk_{i}')}" for i in valid_families],
+    ax2.set_xticklabels([FAMILY_ID_TO_NAME.get(i, f'unk_{i}') for i in valid_families],
                         rotation=45, ha='right')
     ax2.grid(True, alpha=0.3)
     
@@ -330,6 +339,7 @@ def print_detailed_results(metrics, confused_pairs, num_classes=27):
     # 每个家族的性能（只显示有样本的家族）
     print(f"\n=== PER-FAMILY PERFORMANCE ===")
     support = metrics['per_class']['support']
+    accuracy = metrics['per_class']['accuracy']
     precision = metrics['per_class']['precision']
     recall = metrics['per_class']['recall']
     f1 = metrics['per_class']['f1']
@@ -340,9 +350,9 @@ def print_detailed_results(metrics, confused_pairs, num_classes=27):
     # 显示所有有样本的家族，不截断
     for family_id, sample_count in families_with_samples:
         family_name = FAMILY_ID_TO_NAME.get(family_id, f"unknown_{family_id}")
-        print(f"Family {family_id:2d} ({family_name}): Precision={precision[family_id]:.1%}, "
-              f"Recall={recall[family_id]:.1%}, F1={f1[family_id]:.1%} "
-              f"({sample_count} samples)")
+        print(f"Family {family_id:2d} ({family_name}): Accuracy={accuracy[family_id]:.1%}, "
+              f"Precision={precision[family_id]:.1%}, Recall={recall[family_id]:.1%}, "
+              f"F1={f1[family_id]:.1%} ({sample_count} samples)")
     
     # 最容易混淆的家族对 - 显示所有混淆对
     print(f"\n=== ALL CONFUSED FAMILY PAIRS ===")
@@ -365,7 +375,7 @@ def print_detailed_results(metrics, confused_pairs, num_classes=27):
         family_name = FAMILY_ID_TO_NAME.get(i, f"unknown_{i}")
         if support[i] > 0:
             print(f"Family {i:2d} ({family_name:20s}): "
-                  f"P={precision[i]:.1%}, R={recall[i]:.1%}, F1={f1[i]:.1%} "
+                  f"Acc={accuracy[i]:.1%}, P={precision[i]:.1%}, R={recall[i]:.1%}, F1={f1[i]:.1%} "
                   f"({support[i]:4d} samples)")
         else:
             print(f"Family {i:2d} ({family_name:20s}): No test samples")
@@ -392,6 +402,7 @@ def save_results(metrics, confused_pairs, output_file):
         family_name = FAMILY_ID_TO_NAME.get(i, f"unknown_{i}")
         results['per_family_metrics'][str(i)] = {
             'family_name': family_name,
+            'accuracy': metrics['per_class']['accuracy'][i],
             'precision': metrics['per_class']['precision'][i],
             'recall': metrics['per_class']['recall'][i],
             'f1': metrics['per_class']['f1'][i],
@@ -510,5 +521,7 @@ def main():
     print("=" * 60)
 
 
+
 if __name__ == '__main__':
     main()
+    
