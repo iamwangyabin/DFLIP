@@ -33,6 +33,25 @@ QUESTION_TEMPLATES = [
     "<image>\nPlease write an prompt for this image. The prompt will be used by image generation models to try and recreate the image as exactly as possible. So make sure the prompt is complete, accurate, and detailed.",
 ]
 
+
+
+# questions = [
+# 	"Please write an prompt for this image. The prompt will be used by image generation models to try and recreate the image as exactly as possible. So make sure the prompt is complete, accurate, and detailed.",
+# 	"I need a prompt of this image.",
+# 	"I need a caption. No bullshit like "This image is", just a straightforward caption covering all details needed and incorporating the proper tags when you can.",
+# 	"You have to write a caption for this image in a straightforward way without bullshit descriptors like "This image is..." or ambiguity.",
+# 	"I need a caption that is straightforward without bullshit, thanks.",
+# 	"Write a description for this image.",
+# 	"Write the proper prompt to generate the attached image",
+# 	"I would like a straightforward caption.",
+# 	"Write an accurate prompt.",
+# 	"Act as a powerful image captioner. Write a caption for the image without any bullshit or ambiguity.",
+# 	"Please write a concise, editorial-style description of the attached image.",
+# 	"Write a proper caption for this image in a formal tone.",
+# ]
+
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Convert consolidated JSON to LLaVA format"

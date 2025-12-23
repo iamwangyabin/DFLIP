@@ -1,0 +1,84 @@
+model:
+  base_model: "convnext_base"
+  cache_dir: "./models_cache"
+  freeze_encoder: false
+  use_lora: false
+
+bhep:
+  num_families: 27
+
+data:
+  # Dataset paths
+  metadata_path: "./assets/dflip3k_meta_processed.json"
+  image_root: "/media/dataset/person_dataset/DFLIP3K_processed_traintest"
+
+  # HuggingFace Datasets backend (optional)
+  use_hf_dataset: false
+  hf_dataset_path: null
+  
+  # Auto-split validation from training set
+  val_split_ratio: 0.1
+  val_split_seed: 42
+  
+  # Data augmentation - ConvNeXt typically uses 224x224
+  image_size: 224
+  augmentation:
+    horizontal_flip: true
+    rotation_range: 15
+    brightness_range: 0.1
+    contrast_range: 0.1
+  
+  # Dataloader settings
+  num_workers: 8
+  pin_memory: true
+
+training:
+  batch_size: 24  # Moderate batch size for ConvNeXt
+  gradient_accumulation_steps: 2
+  num_epochs: 20
+
+  optimizer: "adamw"
+  learning_rate: 2.0e-4
+  weight_decay: 0.05  # Higher weight decay for ConvNeXt
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+
+  fp16: false
+  bf16: true
+
+  save_strategy: "epoch"
+  save_total_limit: 3
+  output_dir: "./checkpoints/family_classifier_convnext_base"
+
+  logging_steps: 50
+  eval_strategy: "epoch"
+
+logging:
+  # Use SwanLab as logging backend
+  backend: "swanlab"
+  
+  # SwanLab configuration
+  swanlab_project: "dflip3k"
+  swanlab_experiment_name: 'family-classifier-convnext-base'
+  
+  # Legacy WandB support (disabled)
+  use_wandb: false
+  wandb_project: "dflip3k"
+  wandb_entity: null
+  
+  log_level: "INFO"
+
+hardware:
+  seed: 42
+  cuda_deterministic: true
+  dataloader_num_workers: 8
+  
+  ddp: false
+  local_rank: -1
+  
+  use_deepspeed: false
+  deepspeed_config: null

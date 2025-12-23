@@ -106,6 +106,12 @@ def parse_args():
         action="store_true",
         help="Print processing plan without actually processing images",
     )
+    parser.add_argument(
+        "--output-meta",
+        type=str,
+        default=None,
+        help="Path to save updated metadata JSON with processed image paths (default: same as input with '_processed' suffix)",
+    )
     return parser.parse_args()
 
 

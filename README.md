@@ -1,326 +1,188 @@
-# DFLIP: Linguistic Profiling of Deepfakes
+# DFLIP: Deepfake Forensics and Large-scale Image Profiling
 
-Official implementation of **"Linguistic Profiling of Deepfakes"** - A next-generation deepfake detection framework based on Qwen2.5-VL-7B-Instruct.
+这是一个去除定位模块后，更加纯粹、专注于**溯源（Attribution）与检测（Detection）协同**的深度取证项目。
 
-## 📖 Overview
+为了方便你写论文、做汇报或向他人介绍，我将这个项目重新命名为：
 
-Unlike traditional binary classification approaches, DFLIP implements **Linguistic Profiling** for comprehensive deepfake analysis:
-
-1. **Detection**: Distinguish real from fake images
-2. **Identification**: Identify the specific generator model (e.g., MidJourney, DALL·E, Stable Diffusion)
-3. **Prompt Prediction**: Predict the text prompt used to generate the image
-4. **Localization**: Highlight manipulated regions with heatmaps
-
-## 🏗️ Architecture: DFLIP-Net
-
-DFLIP-Net uses a two-stage architecture for efficient multi-task learning:
-
-### Stage 1: The Profiler (Vision Expert)
-- **Purpose**: Visual forensics - detect, identify, and localize forgeries
-- **Model**: Qwen2.5-VL Vision Encoder + LoRA
-- **Tasks**:
-  - Binary classification (real/fake)
-  - Multi-class identification (generator model)
-  - Segmentation (forgery localization)
-- **Output**: Hard metrics and forgery heatmaps
-
-### Stage 2: The Interpreter (Language Expert)
-- **Purpose**: Natural language interpretation and prompt prediction
-- **Model**: Full Qwen2.5-VL with frozen Stage 1 weights + LLM LoRA
-- **Tasks**:
-  - Prompt reconstruction
-  - Human-readable analysis reports
-- **Output**: Natural language explanations and predicted prompts
-
-## 📊 Dataset: DFLIP-3K
-
-- **Scale**: 300K images from 3K generator models
-- **Prompts**: 190K unique generation prompts
-- **Annotations**: 
-  - Real/Fake labels
-  - Generator model IDs
-  - Ground truth prompts
-  - Forgery masks (where available)
-
-## 🚀 Quick Start
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/DFLIP.git
-cd DFLIP
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Prepare Dataset
-
-```bash
-# Convert your DFLIP-3K dataset to the required format
-python dataset/build_dflip3k.py \
-    --data-root /path/to/dflip3k \
-    --output assets/dflip3k_meta.json \
-    --validate-images
-```
-
-Expected directory structure:
-```
-/path/to/dflip3k/
-├── real/
-│   └── images/
-│       ├── img001.jpg
-│       └── ...
-└── fake/
-    ├── stable-diffusion-v1.5/
-    │   ├── images/
-    │   ├── prompts.txt
-    │   └── masks/
-    ├── midjourney-v5/
-    │   └── ...
-    └── ...
-```
-
-### Training
-
-#### Stage 1: Train the Profiler
-
-```bash
-python scripts/train_profiler.py \
-    --config configs/dflip_config.yaml
-```
-
-This will train the vision encoder with LoRA for multi-task learning (detection, identification, localization).
-
-**Output**: `checkpoints/stage1/best_model/`
-
-#### Stage 2: Train the Interpreter
-
-```bash
-python scripts/train_interpreter.py \
-    --config configs/dflip_config.yaml \
-    --stage1-checkpoint checkpoints/stage1/best_model
-```
-
-This will train the LLM with LoRA for prompt prediction, using frozen Stage 1 weights.
-
-**Output**: `checkpoints/stage2/best_model/`
-
-### Inference
-
-#### Full Pipeline (Both Stages)
-
-```bash
-python scripts/run_inference.py \
-    --image path/to/test_image.jpg \
-    --stage both \
-    --stage1-checkpoint checkpoints/stage1/best_model \
-    --stage2-checkpoint checkpoints/stage2/best_model \
-    --save-visualization
-```
-
-#### Stage 1 Only (Fast Profiling)
-
-```bash
-python scripts/run_inference.py \
-    --image path/to/test_image.jpg \
-    --stage profiling \
-    --stage1-checkpoint checkpoints/stage1/best_model \
-    --save-visualization
-```
-
-#### Stage 2 Only (Prompt Prediction)
-
-```bash
-python scripts/run_inference.py \
-    --image path/to/test_image.jpg \
-    --stage interpreting \
-    --stage1-checkpoint checkpoints/stage1/best_model \
-    --stage2-checkpoint checkpoints/stage2/best_model
-```
-
-## 📁 Project Structure
-
-```
-DFLIP/
-├── dflip_dataset/          # Data processing
-│   ├── dataset.py          # DFLIPDataset with dual modes
-│   ├── formatting.py       # Prompt formatting utilities
-│   └── build_dflip3k.py    # Dataset preprocessing script
-├── dflip_models/           # Model definitions
-│   ├── qwen_vision.py      # Stage 1: Profiler
-│   ├── qwen_full.py        # Stage 2: Interpreter
-│   ├── heads.py            # Task-specific heads
-│   └── __init__.py
-├── scripts/                # Training & inference
-│   ├── train_profiler.py   # Stage 1 training
-│   ├── train_interpreter.py # Stage 2 training
-│   └── run_inference.py    # End-to-end inference
-├── configs/
-│   └── dflip_config.yaml   # All hyperparameters
-├── assets/
-│   └── dflip3k_meta.json   # Dataset metadata
-├── checkpoints/            # Model weights (gitignored)
-├── outputs/                # Inference results
-└── requirements.txt
-```
-
-## ⚙️ Configuration
-
-All training and inference settings are in [`configs/dflip_config.yaml`](configs/dflip_config.yaml):
-
-- **Model**: Base model, LoRA configurations
-- **Data**: Paths, splits, augmentation
-- **Training**: Learning rates, batch sizes, loss weights
-- **Inference**: Generation parameters
-
-Key parameters:
-
-```yaml
-model:
-  base_model: "Qwen/Qwen2.5-VL-7B-Instruct"
-  stage1_lora:
-    r: 16
-    lora_alpha: 32
-  stage2_lora:
-    r: 16
-    lora_alpha: 32
-
-stage1_training:
-  batch_size: 8
-  learning_rate: 2.0e-4
-  loss_weights:
-    detection: 1.0
-    identification: 1.0
-    localization: 0.5
-
-stage2_training:
-  batch_size: 4
-  learning_rate: 1.0e-4
-  freeze_vision: true
-```
-
-## 🎯 Features
-
-- **Dual-Mode Dataset**: Automatic task mode switching for Stage 1 (profiling) and Stage 2 (interpreting)
-- **Multi-Task Learning**: Joint optimization of detection, identification, and localization
-- **LoRA Efficiency**: Parameter-efficient fine-tuning with PEFT
-- **Mixed Precision**: BF16 training for efficiency
-- **Distributed Training**: Multi-GPU support with DDP/DeepSpeed
-- **Checkpointing**: Automatic best model saving and resumption
-- **Logging**: WandB integration for experiment tracking
-- **Visualization**: Heatmap overlays and result plots
-
-## 🔬 Model Architecture Details
-
-### Stage 1: DFLIPProfiler
-
-```
-Qwen2.5-VL Vision Encoder (with LoRA)
-    ↓
-├─→ Detection Head → Real/Fake (BCE Loss)
-├─→ Identification Head → Generator ID (CE Loss)
-└─→ Localization Head → Forgery Mask (Dice Loss)
-```
-
-**Loss Function**: λ₁·BCE + λ₂·CrossEntropy + λ₃·Dice
-
-### Stage 2: DFLIPInterpreter
-
-```
-┌─ Qwen2.5-VL Vision Encoder (Frozen from Stage 1)
-│
-├─ Qwen2.5-VL Language Model (with LoRA)
-│
-└─→ Generated Text: Prompt + Analysis
-```
-
-**Training**: Supervised fine-tuning (SFT) with conversation format
-
-## 📊 Example Output
-
-### Stage 1 Output
-```
-Detection: FAKE (98.5%)
-Generator ID: 3 (Stable-Diffusion-v1.5)
-Forgery Localization: [Heatmap saved]
-```
-
-### Stage 2 Output
-```
-Analysis Result:
-
-1. Authenticity: This image is AI-generated (deepfake).
-
-2. Generator Model: Stable-Diffusion-v1.5
-
-3. Predicted Prompt:
-a futuristic city with flying cars at sunset, highly detailed, 
-cinematic lighting, digital art, 8k resolution
-
-The image exhibits typical characteristics of AI-generated content from this model.
-```
-
-## 🛠️ Requirements
-
-- Python 3.8+
-- PyTorch 2.0+
-- CUDA 11.8+ (for GPU training)
-- 24GB+ VRAM (for 7B model)
-
-## 🔧 Advanced Usage
-
-### Debug Mode
-
-```bash
-# Quick test with limited steps
-python scripts/train_profiler.py --debug --steps 10
-```
-
-### Resume Training
-
-```bash
-python scripts/train_profiler.py --resume checkpoints/stage1/checkpoint-epoch-5
-```
-
-### Custom Config
-
-```bash
-python scripts/train_profiler.py --config my_custom_config.yaml
-```
-
-## 📝 Citation
-
-If you use DFLIP in your research, please cite:
-
-```bibtex
-@article{yourname2024dflip,
-  title={Linguistic Profiling of Deepfakes},
-  author={Your Name},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
-  year={2024}
-}
-```
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-- **Qwen Team** for the excellent Qwen2.5-VL foundation model
-- **PEFT Library** for efficient LoRA implementation
-- **DFLIP-3K Dataset** contributors
-
-## 🐛 Issues & Contributing
-
-Found a bug or want to contribute? Please open an issue or submit a pull request!
-
-## 📧 Contact
-
-For questions or collaborations, please contact: [your.email@example.com]
+### **HBE-Net: 基于层级贝叶斯证据网络的深度伪造取证**
+**(Hierarchical Bayesian Evidential Network for Deepfake Forensics)**
 
 ---
 
-**Built with ❤️ for advancing deepfake detection research**
+### 1. 项目的核心理念：像刑侦专家一样思考
+
+传统的 Deepfake 检测器是一个“黑盒”，它只看一眼图，就给出一个 0 或 1。
+**HBE-Net** 模拟了人类鉴识专家的**逻辑推理过程**：
+
+1.  **先看直觉**：这张图有没有通用的伪造痕迹？
+2.  **再查族谱**：这像不像是某个已知家族（如 GAN 或 Diffusion）做出来的？
+3.  **细查版本**：如果像 GAN，那是 StyleGAN 还是 CycleGAN？
+4.  **自我怀疑**：我对上述判断有多大把握？如果不确定，我就降低这个证据的权重。
+
+---
+
+### 2. 为什么要这么做？（解决的三大痛点）
+
+*   **痛点一：逻辑割裂**
+    *   *旧方法*：检测（真假）和溯源（哪个模型生成的）是两个独立的任务。
+    *   *新方法*：**协同增强**。如果你能确定这张图是 Stable Diffusion 生成的，那它**必然**是假的。溯源的确定性直接支撑检测的结论。
+
+*   **痛点二：新旧模型混杂**
+    *   *旧方法*：遇到未知的生成模型（训练集没见过的），分类器会瞎猜一个类别，导致误判。
+    *   *新方法*：**不确定性建模**。遇到未知模型，溯源分支会输出“我不知道（高不确定性）”，系统会自动忽略溯源分支，退回到通用特征检测，保证系统的鲁棒性。
+
+*   **痛点三：真实样本的归属悖论**
+    *   *旧方法*：强迫模型把“真实图片”分类为某种生成器，这在逻辑上是错误的。
+    *   *新方法*：**OOD（分布外）抑制**。训练时教导模型：“看到真实图片，就保持沉默（输出均匀分布）”。
+
+---
+
+### 3. 核心架构详解
+
+该系统由 **Backbone** 和 **三个逻辑分支** 组成，最终汇聚于 **贝叶斯融合层**。
+
+#### A. 第一分支：通用直觉 (Base Branch)
+*   **角色**：全科医生。
+*   **任务**：仅基于图像的通用特征（如频谱异常、噪点不一致）判断真伪。
+*   **特点**：它的判断最基础，但也最稳健。我们给它设定一个基准不确定性（如 0.5）。
+
+#### B. 第二分支：层级溯源专家 (Hierarchical Genealogy Branch)
+这是本项目的核心创新点，分为两层：
+
+*   **Level 1：大类识别 (Family Head)**
+    *   判断图像属于 **GAN、Diffusion、Autoregressive** 中的哪一派。
+    *   使用的是 **EDL (证据深度学习)**，输出的是狄利克雷分布，能够量化“不知道”的程度。
+
+*   **Level 2：具体版本识别 (Version Head)**
+    *   判断具体是 **SD1.5, Midjourney, StyleGAN2** 等具体版本。
+    *   **条件依赖 (Conditional Dependency)**：它不仅看图，还接收 Level 1 的判断结果。
+    *   **逻辑掩码 (Logical Masking)**：这是一个数学约束。如果 Level 1 判定是 GAN，那么 Level 2 中属于 Diffusion 的选项会被自动屏蔽。这解决了小类别数量不齐的问题。
+
+#### C. 贝叶斯融合大脑 (Bayesian Fusion)
+*   **机制**：**基于信任度的加权投票**。
+*   **公式逻辑**：
+    $$ \text{权重} \propto \frac{1}{\text{不确定性}} $$
+*   **工作流**：
+    *   如果**溯源专家**非常自信（“我敢肯定是 SD1.5”），它的权重飙升，主导最终结果 -> **判假**。
+    *   如果**溯源专家**一脸懵（“这图我不认识，可能是真图，也可能是新型生成器”），它的权重骤降 -> **听全科医生（Base Branch）的**。
+
+---
+
+### 4. 关键技术亮点 (Key Contributions)
+
+#### 1. 证据深度学习 (Evidential Deep Learning, EDL)
+我们不再输出 Softmax 概率，而是输出 **Dirichlet 分布参数 ($\alpha$)**。这让我们能区分 **“犹豫不决(0.5 vs 0.5)”** 和 **“完全无知(0.0 vs 0.0)”** 这两种状态。
+
+#### 2. 逻辑门控掩码 (Logical Gating Mask)
+我们设计了一个矩阵运算，将人类定义的层级知识（Knowledge Graph）硬编码进网络。这使得模型不可能做出“它是 StyleGAN 家族的 Stable Diffusion”这种逻辑错误的预测。
+
+#### 3. 针对 Real 样本的证据抑制 (Evidence Suppression)
+这是训练策略的精髓。
+*   **Fake 图**：训练模型**分类准确**（Loss = EDL Classification）。
+*   **Real 图**：训练模型**最大化不确定性**（Loss = KL Divergence to Uniform）。
+    这让模型学会了在面对真图时“闭嘴”，从而避免了误导检测结果。
+
+---
+
+### 5. 预期效果与应用场景
+
+*   **场景一：已知攻击（如 DeepFakes 换脸）**
+    *   模型精准识别出是“FaceSwap”算法，溯源分支置信度极高，直接判假。
+*   **场景二：未知攻击（如最新出的 Sora 视频截图）**
+    *   溯源分支表示“没见过”（高不确定性），权重降低。
+    *   Base 分支发现视频帧边缘有异常，判定为假。
+    *   **结果**：依然能检出，且系统会提示“检测到未知类型的伪造”。
+*   **场景三：误报过滤**
+    *   遇到一张光影很奇怪的**真实照片**。
+    *   传统模型可能会误报。
+    *   本模型发现溯源分支无法匹配任何已知生成器特征，且不确定性极高，最终可能给出一个较低的伪造分，避免误杀。
+
+---
+
+### 总结
+
+这个项目是一个**结构化、可解释、且具备自我认知能力的深度伪造检测系统**。它不满足于仅仅给出一个结果，而是试图构建一个符合逻辑的证据链，通过贝叶斯理论完美融合了“通用特征”与“特定指纹”，是下一代取证技术的典型代表。
+
+
+
+
+python tools/generate_dataset_meta_dflip3k.py \
+>   --fake-root /home/data/yabin/DFLIP3K/fake \
+>   --real-root /home/data/yabin/DFLIP3K/real_pair \
+>   --image-root /home/data/yabin/DFLIP3K \
+>   --output ./assets/dflip3k_meta.json \
+>   --train-ratio 0.8 \
+>   --seed 42
+Families (sorted):
+  - aura_flow
+  - chroma
+  - flux.1_d
+  - flux.1_s
+  - flux2-dev
+  - gpt-image-1
+  - hidream
+  - hunyuan
+  - illustrious
+  - imagen4
+  - kolors
+  - nano_banana
+  - nano_banana_pro
+  - noobai
+  - pixart
+  - playground_v2
+  - pony
+  - pony_v7
+  - qwen
+  - sd_1.5
+  - sd_2.1
+  - sd_3.5_large
+  - sd_3.5_medium
+  - sdxl_1.0
+  - seedream
+  - stable_cascade
+  - z-image
+
+Total families: 27
+Total versions: 1386
+Found 763318 fake images
+Found 641470 real images
+Total images (real + fake): 1404788
+
+Dataset split:
+  train: 1123830 (80.0%)
+  val: 140479 (10.0%)
+  test: 140479 (10.0%)
+
+Metadata saved to assets/dflip3k_meta.json
+
+=== BHEP config suggestion ===
+num_families: 27
+num_versions: 1386
+hierarchy (family_idx -> version_ids):
+  family 0: [0]
+  family 1: [1]
+  family 2: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  family 3: [15, 16, 17]
+  family 4: [18]
+  family 5: [19]
+  family 6: [20]
+  family 7: [21]
+  family 8: [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56]
+  family 9: [57]
+  family 10: [58]
+  family 11: [59]
+  family 12: [60]
+  family 13: [61, 62, 63, 64]
+  family 14: [65]
+  family 15: [66]
+  family 16: [67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158]
+  family 17: [159]
+  family 18: [160, 161, 162, 163, 164]
+  family 19: [165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764]
+  family 20: [765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796]
+  family 21: [797, 798]
+  family 22: [799]
+  family 23: [800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1046, 1047, 1048, 1049, 1050, 1051, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067, 1068, 1069, 1070, 1071, 1072, 1073, 1074, 1075, 1076, 1077, 1078, 1079, 1080, 1081, 1082, 1083, 1084, 1085, 1086, 1087, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1097, 1098, 1099, 1100, 1101, 1102, 1103, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115, 1116, 1117, 1118, 1119, 1120, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146, 1147, 1148, 1149, 1150, 1151, 1152, 1153, 1154, 1155, 1156, 1157, 1158, 1159, 1160, 1161, 1162, 1163, 1164, 1165, 1166, 1167, 1168, 1169, 1170, 1171, 1172, 1173, 1174, 1175, 1176, 1177, 1178, 1179, 1180, 1181, 1182, 1183, 1184, 1185, 1186, 1187, 1188, 1189, 1190, 1191, 1192, 1193, 1194, 1195, 1196, 1197, 1198, 1199, 1200, 1201, 1202, 1203, 1204, 1205, 1206, 1207, 1208, 1209, 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219, 1220, 1221, 1222, 1223, 1224, 1225, 1226, 1227, 1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1240, 1241, 1242, 1243, 1244, 1245, 1246, 1247, 1248, 1249, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259, 1260, 1261, 1262, 1263, 1264, 1265, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1274, 1275, 1276, 1277, 1278, 1279, 1280, 1281, 1282, 1283, 1284, 1285, 1286, 1287, 1288, 1289, 1290, 1291, 1292, 1293, 1294, 1295, 1296, 1297, 1298, 1299, 1300, 1301, 1302, 1303, 1304, 1305, 1306, 1307, 1308, 1309, 1310, 1311, 1312, 1313, 1314, 1315, 1316, 1317, 1318, 1319, 1320, 1321, 1322, 1323, 1324, 1325, 1326, 1327, 1328, 1329, 1330, 1331, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1348, 1349, 1350, 1351, 1352, 1353, 1354, 1355, 1356, 1357, 1358, 1359, 1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1378, 1379, 1380, 1381, 1382]
+  family 24: [1383]
+  family 25: [1384]
+  family 26: [1385]

@@ -419,75 +419,43 @@ def create_publication_figure(
         # Load and display image
         img_path = image_root_path / model_info['image_path']
         if img_path.exists():
-            try:
-                img = Image.open(img_path)
-                img = img.convert('RGB')
+            img = Image.open(img_path)
+            img = img.convert('RGB')
 
-                # Central resize crop
-                width, height = img.size
-                if width < height:
-                    new_width = image_size
-                    new_height = int(height * image_size / width)
-                else:
-                    new_height = image_size
-                    new_width = int(width * image_size / height)
+            # Central resize crop
+            width, height = img.size
+            if width < height:
+                new_width = image_size
+                new_height = int(height * image_size / width)
+            else:
+                new_height = image_size
+                new_width = int(width * image_size / height)
 
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-                # Center crop to square
-                width, height = img.size
-                left = (width - image_size) // 2
-                top = (height - image_size) // 2
-                right = left + image_size
-                bottom = top + image_size
+            # Center crop to square
+            width, height = img.size
+            left = (width - image_size) // 2
+            top = (height - image_size) // 2
+            right = left + image_size
+            bottom = top + image_size
 
-                img = img.crop((left, top, right, bottom))
+            img = img.crop((left, top, right, bottom))
 
-                ax.imshow(img)
+            ax.imshow(img)
 
-                # Create clean title
-                original_family_name = model_info['family_name'].lower()
-                name_mapping = get_model_name_mapping()
-
-                if original_family_name in name_mapping:
-                    display_name = name_mapping[original_family_name]
-                else:
-                    display_name = model_info['family_name'].replace('_', ' ').title()
-
-                # 应用大字号
-                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, weight='bold',
-                             fontproperties=times_font, wrap=False,
-                             horizontalalignment='center', clip_on=False)
-                ax.axis('off')
-
-            except Exception as e:
-                print(f"Error loading image {img_path}: {e}")
-                ax.text(0.5, 0.5, 'Image\nError', ha='center', va='center',
-                        fontsize=20, color='red')
-
-                original_family_name = model_info['family_name'].lower()
-                name_mapping = get_model_name_mapping()
-                if original_family_name in name_mapping:
-                    display_name = name_mapping[original_family_name]
-                else:
-                    display_name = model_info['family_name'].replace('_', ' ').title()
-
-                ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, fontproperties=times_font,
-                             wrap=False, horizontalalignment='center', clip_on=False)
-                ax.axis('off')
-        else:
-            ax.text(0.5, 0.5, 'Image\nNot Found', ha='center', va='center',
-                    fontsize=20, color='red')
-
+            # Create clean title
             original_family_name = model_info['family_name'].lower()
             name_mapping = get_model_name_mapping()
+
             if original_family_name in name_mapping:
                 display_name = name_mapping[original_family_name]
             else:
                 display_name = model_info['family_name'].replace('_', ' ').title()
 
-            ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, fontproperties=times_font,
-                         wrap=False, horizontalalignment='center', clip_on=False)
+            ax.set_title(display_name, fontsize=TITLE_FONT_SIZE, pad=TITLE_PAD, weight='bold',
+                         fontproperties=times_font, wrap=False,
+                         horizontalalignment='center', clip_on=False)
             ax.axis('off')
 
     # Fill empty slots
